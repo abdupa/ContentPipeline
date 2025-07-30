@@ -1,0 +1,22 @@
+# Python
+/backend/venv/
+__pycache__/
+*.pyc
+
+# Node
+/frontend/node_modules/
+/frontend/dist/
+npm-debug.log
+
+# Docker
+.dockerignore
+
+# IDE/OS files
+.vscode/
+.DS_Store
+
+# Environment variables
+# Never commit secret keys!
+.env
+.env.*
+!.env.example

@@ -1,0 +1,54 @@
+services:
+  backend:
+    build: ./backend
+    image: contentgen-backend:latest # <-- NEW: Give the image a unique name
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - /app/venv
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/docs"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  redis:
+    image: "redis:alpine"
+    ports:
+      - "6380:6379"
+
+  celery-worker:
+    build: ./backend
+    image: contentgen-backend:latest # <-- NEW: Use the same unique image name
+    command: celery -A tasks worker --loglevel=info
+    env_file:
+      - .env
+    volumes:
+      - ./backend:/app
+      - /app/venv
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      - backend
+      - redis
