@@ -10,3 +10,4 @@ playwright
 Pillow
 uvicorn
 python-multipart
+woocommerce

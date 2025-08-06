@@ -1,11 +1,24 @@
+// import React, { useState, useEffect, useRef } from 'react';
+// import axios from 'axios';
+// import Sidebar from './components/Sidebar.jsx';
+// import InitialUploadView from './components/InitialUploadView.jsx';
+// import AnalysisResultsView from './components/AnalysisResultsView.jsx';
+// import ContentCompleteView from './components/ContentCompleteView.jsx';
+// import DashboardView from './components/DashboardView.jsx';
+// import ScraperWizardView from './components/ScraperWizardView.jsx';
+// import ProjectsView from './components/ProjectsView.jsx';
+// import JobStatusView from './components/JobStatusView.jsx';
+// import { HelpCircle, Bell, ChevronDown } from 'lucide-react';
+
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import Sidebar from './components/Sidebar.jsx';
-import InitialUploadView from './components/InitialUploadView.jsx';
-import AnalysisResultsView from './components/AnalysisResultsView.jsx';
-import ContentCompleteView from './components/ContentCompleteView.jsx';
 import DashboardView from './components/DashboardView.jsx';
-import ScraperWizardView from './components/ScraperWizardView.jsx'; // 1. Import the new component
+import ScraperWizardView from './components/ScraperWizardView.jsx';
+import ProjectsView from './components/ProjectsView.jsx';
+import JobStatusView from './components/JobStatusView.jsx';
+import ApprovalQueueView from './components/ApprovalQueueView.jsx'; // <-- Import new
+import ContentEditorView from './components/ContentEditorView.jsx'; // <-- Import new
 import { HelpCircle, Bell, ChevronDown } from 'lucide-react';
 
 const backendApiUrl = `http://${window.location.hostname}:8000`;
@@ -16,183 +29,92 @@ const apiClient = axios.create({
 
 const App = () => {
   const [currentView, setCurrentView] = useState('dashboard');
-  const [selectedFile, setSelectedFile] = useState(null);
-  const [selectedFileName, setSelectedFileName] = useState('');
-  const [analysisResults, setAnalysisResults] = useState(null);
-  const [jobDetails, setJobDetails] = useState(null);
-  const [jobId, setJobId] = useState(null);
+  
+  // State for scraping project flow
+  const [activeScrapeJobId, setActiveScrapeJobId] = useState(null);
+  const [projectToEdit, setProjectToEdit] = useState(null);
+  
+  // NEW: State for the approval queue flow
+  const [draftToEditId, setDraftToEditId] = useState(null);
+
   const intervalRef = useRef(null);
 
-  // --- Event Handlers ---
-  const resetUploadState = () => {
-    setCurrentView('initialUpload');
-    setSelectedFile(null);
-    setSelectedFileName('');
-    setAnalysisResults(null);
-    setJobDetails(null);
-    setJobId(null);
-  };
-
-  const handleViewContent = () => {
-    alert("This would navigate to a page showing all generated content.");
-    setCurrentView('dashboard');
-  };
-
-  const handleDownloadResults = () => {
-    if (!jobDetails || !jobDetails.results || jobDetails.results.length === 0) {
-      alert("No results to download.");
-      return;
-    }
-    const csvRows = [];
-    csvRows.push(['Title', 'Status', 'Generated On', 'URL', 'Notes'].join(','));
-    jobDetails.results.forEach(row => {
-      const title = `"${(row.title || '').replace(/"/g, '""')}"`;
-      const notes = `"${(row.notes || '').replace(/"/g, '""')}"`;
-      csvRows.push([title, row.status, row.generatedOn, row.actions, notes].join(','));
-    });
-    const csvString = csvRows.join('\n');
-    const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.setAttribute('download', `job_${jobId}_results.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
   const handleMenuItemClick = (itemName) => {
-    if (itemName === 'Upload CSV') {
-      resetUploadState();
-    } else if (itemName === 'Dashboard') {
+    if (intervalRef.current) clearInterval(intervalRef.current);
+
+    if (itemName === 'Dashboard') {
       setCurrentView('dashboard');
-    } else if (itemName === 'Scrape Content') { // 2. Add a case for the new view
-      setCurrentView('scrapeContent');
+    } else if (itemName === 'Scrape Content') {
+      setCurrentView('projects');
+    } else if (itemName === 'Approval Queue') { // <-- NEW
+      setCurrentView('approvalQueue');
     } else {
       alert(`Navigating to: ${itemName}`);
     }
   };
 
-  const handleFileSelect = (event) => {
-    const file = event.target.files[0];
-    if (file) {
-      setSelectedFile(file);
-      setSelectedFileName(file.name);
-    }
-  };
-
-  const handleUploadAndAnalyze = async () => {
-    if (!selectedFile) {
-      alert("Please select a file first.");
-      return;
-    }
-    const formData = new FormData();
-    formData.append("file", selectedFile);
+  const handleRunProject = async (projectId) => {
     try {
-      const response = await apiClient.post('/upload-and-analyze/', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
-      setAnalysisResults(response.data);
-      setJobId(response.data.job_id);
-      setCurrentView('analysisResults');
+      const response = await apiClient.post(`/api/projects/${projectId}/run`);
+      setActiveScrapeJobId(response.data.job_id);
+      setCurrentView('scrapeJobStatus');
     } catch (error) {
-      alert(error.response?.data?.detail || "File analysis failed.");
+        alert(error.response?.data?.detail || "Failed to start project run.");
     }
   };
 
-  const handleStartGeneration = async () => {
-    if (!jobId) {
-      alert("No job ID found. Please try uploading again.");
-      return;
-    }
-    try {
-      await apiClient.post(`/start-content-generation/${jobId}`);
-      setCurrentView('jobMonitoring');
-    } catch (error) {
-      alert(error.response?.data?.detail || "Could not start content generation.");
-    }
-  };
-
-  // Polling Logic
-  useEffect(() => {
-    const stopPolling = () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
-    };
-    if (currentView === 'jobMonitoring' && jobId) {
-      const fetchJobStatus = async () => {
-        try {
-          const response = await apiClient.get(`/jobs/${jobId}/status`);
-          setJobDetails(response.data);
-          if (response.data.processed_rows === response.data.total_rows && response.data.total_rows > 0) {
-            stopPolling();
-          }
-        } catch (error) {
-          console.error("Error fetching job status:", error);
-          stopPolling();
-        }
-      };
-      stopPolling();
-      fetchJobStatus();
-      intervalRef.current = setInterval(fetchJobStatus, 3000);
-    }
-    return stopPolling;
-  }, [currentView, jobId]);
-
-  // Helper Function
-  const getActiveSidebarItem = () => {
-    if (['initialUpload', 'analysisResults', 'jobMonitoring'].includes(currentView)) {
-      return 'Upload CSV';
-    } else if (currentView === 'dashboard') {
-      return 'Dashboard';
-    } else if (currentView === 'scrapeContent') { // 3. Add a case to highlight the new menu item
-      return 'Scrape Content';
-    }
-    return '';
+  const handleEditProject = (project) => {
+    setProjectToEdit(project);
+    setCurrentView('scrapeWizard');
   };
   
-  // Render Logic
+  // NEW: Handler to open a draft in the editor
+  const handleEditDraft = (draftId) => {
+    setDraftToEditId(draftId);
+    setCurrentView('contentEditor');
+  };
+
+  const getActiveSidebarItem = () => {
+    if (['projects', 'scrapeWizard', 'scrapeJobStatus'].includes(currentView)) {
+      return 'Scrape Content';
+    }
+    if (['approvalQueue', 'contentEditor'].includes(currentView)) { // <-- NEW
+      return 'Approval Queue';
+    }
+    return 'Dashboard';
+  };
+  
   const renderCurrentView = () => {
     switch (currentView) {
       case 'dashboard':
         return <DashboardView />;
-      case 'initialUpload':
-        return <InitialUploadView onFileSelect={handleFileSelect} onUpload={handleUploadAndAnalyze} selectedFileName={selectedFileName} />;
-      case 'analysisResults':
-        if (!analysisResults) return <div>Analyzing file...</div>;
-        return <AnalysisResultsView 
-                  analysisData={analysisResults}
-                  onFileChange={resetUploadState}
-                  onStartContentGeneration={handleStartGeneration} 
-                />;
-      case 'jobMonitoring':
-        if (!jobDetails) return <div>Loading job details...</div>;
-        
-        const adaptedJobStatus = {
-            totalPosts: jobDetails.total_rows,
-            successfulPosts: jobDetails.processed_rows,
-            errorsFound: (jobDetails.results || []).filter(r => r.status === 'Failed').length, 
-        };
-        const adaptedContentData = jobDetails.results || [];
-
-        return <ContentCompleteView 
-                  jobStatus={adaptedJobStatus} 
-                  contentData={adaptedContentData}
-                  onGenerateMore={resetUploadState}
-                  onViewContent={handleViewContent}
-                  handleDownloadResults={handleDownloadResults}
-                />;
       
-      case 'scrapeContent': // 4. Add a case to render the new component
-        return <ScraperWizardView />;
+      // Scraping Project Flow
+      case 'projects':
+        return <ProjectsView 
+                  onCreateNew={() => { setProjectToEdit(null); setCurrentView('scrapeWizard'); }} 
+                  onRunProject={handleRunProject}
+                  onEditProject={handleEditProject}
+                />;
+      case 'scrapeWizard':
+        return <ScraperWizardView 
+                  projectToEdit={projectToEdit}
+                  onProjectSaved={() => { setProjectToEdit(null); setCurrentView('projects'); }} 
+                />;
+      case 'scrapeJobStatus':
+        return <JobStatusView jobId={activeScrapeJobId} onReset={() => setCurrentView('projects')} />;
+
+      // Approval Queue Flow
+      case 'approvalQueue':
+        return <ApprovalQueueView onEditDraft={handleEditDraft} />;
+      case 'contentEditor':
+        return <ContentEditorView draftId={draftToEditId} onBack={() => setCurrentView('approvalQueue')} />;
 
       default:
         return <DashboardView />;
     }
   };
 
-  // Main Render
   return (
     <div className="min-h-screen bg-gray-100 flex font-sans">
       <Sidebar onMenuItemClick={handleMenuItemClick} activeItem={getActiveSidebarItem()} />

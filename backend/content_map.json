@@ -1,0 +1,750 @@
+{
+  "pillars": [
+    {
+      "pillar_name": "Smartphone Hub Philippines 2025",
+      "url": "https://gadgetph.com/smartphones/",
+      "keywords": [
+        "smartphone price list Philippines 2025",
+        "latest smartphone prices",
+        "best deals Philippines",
+        "compare smartphone specs & prices"
+      ],
+      "clusters": [
+        {
+          "cluster_name": "Samsung Phone Hub",
+          "url": "https://gadgetph.com/smartphones/samsung/",
+          "keywords": ["Samsung phones", "Samsung Galaxy", "latest Samsung phones"],
+          "clusters": [
+            {
+              "cluster_name": "Samsung News & Updates",
+              "url": "https://gadgetph.com/samsung-news-updates/",
+              "keywords": ["samsung news", "latest galaxy news"]
+            },
+            {
+              "cluster_name": "Samsung Phones Review",
+              "url": "https://gadgetph.com/samsung-phones-review/",
+              "keywords": ["samsung phones review", "samsung galaxy review"]
+            },
+            {
+              "cluster_name": "Samsung Price List",
+              "url": "https://gadgetph.com/smartphones/samsung/price-list/",
+              "keywords": ["samsung price list", "samsung phone prices"]
+            },
+            {
+              "cluster_name": "Samsung Galaxy S25 Series: Your Ultimate Guide",
+              "url": "https://gadgetph.com/samsung-galaxy-s25-comparison/",
+              "keywords": [
+                "Galaxy S25 Series",
+                "Samsung S25",
+                "S25 Ultra"
+              ],
+              "clusters": [
+                {
+                  "cluster_name": "Samsung Galaxy S25 Review",
+                  "url_pattern": "/samsung-galaxy-s25-review/",
+                  "keywords": ["galaxy s25 review", "s25 review philippines"]
+                },
+                {
+                  "cluster_name": "Samsung Galaxy S25 vs. S24",
+                  "url_pattern": "/samsung-galaxy-s25-vs-s24-comparison/",
+                  "keywords": ["s25 vs s24", "galaxy s25 comparison"]
+                },
+                {
+                  "cluster_name": "Samsung Galaxy S25 Edge",
+                  "url_pattern": "/samsung-galaxy-s25-edge-price-specs/",
+                  "keywords": ["samsung galaxy s25 edge", "s25 edge price", "curved amoled"]
+                }
+              ]
+            },
+            {
+              "cluster_name": "Samsung Galaxy S Series Evolution: Expanded Timeline",
+              "url": "https://gadgetph.com/samsung-galaxy-s-series-evolution/",
+              "keywords": ["samsung galaxy s series", "s series timeline", "galaxy evolution"]
+            },
+            {
+              "cluster_name": "Samsung Phone Comparisons",
+              "url": "https://gadgetph.com/samsung-comparisons/",
+              "keywords": ["samsung phone comparisons", "samsung vs"]
+            },
+            {
+              "cluster_name": "Samsung Performance & Benchmark",
+              "url": "https://gadgetph.com/samsung-performance-benchmarks/",
+              "keywords": ["samsung performance", "samsung benchmarks", "galaxy speed test"]
+            },
+            {
+              "cluster_name": "Best Samsung Phones in 2025",
+              "url": "https://gadgetph.com/best-samsung-phones-2025/",
+              "keywords": ["best samsung phones", "top galaxy picks"]
+            },
+            {
+              "cluster_name": "Samsung AI-Enabled Phones Guide 2025",
+              "url": "https://gadgetph.com/page-categories/samsung-ai-phones/",
+              "keywords": ["samsung ai phones", "galaxy ai tools", "live translate"]
+            },
+            {
+              "cluster_name": "Best Samsung Accessories",
+              "url": "https://gadgetph.com/best-samsung-accessories/",
+              "keywords": ["samsung accessories", "galaxy buds", "galaxy watch"]
+            }
+          ]
+        },
+        {
+          "cluster_name": "Honor Phone Hub 2025",
+          "url": "https://gadgetph.com/smartphones/honor/hub/",
+          "keywords": ["Honor Phone Hub", "latest Honor phones"],
+          "clusters": [
+            {
+              "cluster_name": "Honor News & Updates",
+              "url": "https://gadgetph.com/honor-news-updates/",
+              "keywords": ["honor news", "latest honor updates"]
+            },
+            {
+              "cluster_name": "Honor Phones Review",
+              "url": "https://gadgetph.com/honor-phones-review/",
+              "keywords": ["honor phones review", "honor review"]
+            },
+            {
+              "cluster_name": "Honor Price List 2025",
+              "url": "https://gadgetph.com/smartphones/honor/price-list/",
+              "keywords": ["Honor phones Philippines", "Honor phone price list"]
+            },
+            {
+              "cluster_name": "Honor Phone Comparisons 2025",
+              "url": "https://gadgetph.com/honor-comparisons/",
+              "keywords": ["honor phone comparisons", "honor vs"]
+            },
+            {
+              "cluster_name": "Honor 400 Series Guide",
+              "url": "https://gadgetph.com/page-categories/honor-400-series/",
+              "keywords": ["Honor 400 series", "Honor 400 specs", "Honor 400 buying guide"]
+            }
+          ]
+        },
+        {
+          "cluster_name": "Infinix Phone Hub 2025",
+          "url": "https://gadgetph.com/smartphones/infinix/hub/",
+          "keywords": ["Infinix Phone Hub", "latest Infinix phones"],
+          "clusters": [
+            {
+              "cluster_name": "Infinix News & Updates",
+              "url": "https://gadgetph.com/infinix-news-updates/",
+              "keywords": ["infinix news", "latest infinix updates"]
+            },
+            {
+              "cluster_name": "Infinix Phones Review",
+              "url": "https://gadgetph.com/infinix-phones-review/",
+              "keywords": ["infinix phones review", "infinix review"]
+            },
+            {
+              "cluster_name": "Infinix Price List 2025",
+              "url": "https://gadgetph.com/smartphones/infinix/price-list/",
+              "keywords": ["Infinix phones Philippines", "Infinix phone price list"]
+            },
+            {
+              "cluster_name": "Infinix Phone Comparisons 2025",
+              "url": "https://gadgetph.com/infinix-comparisons/",
+              "keywords": ["infinix phone comparisons", "infinix vs"]
+            },
+            {
+              "cluster_name": "Infinix GT 30 Pro Price",
+              "url": "https://gadgetph.com/infinix-gt-30-pro-price-philippines/",
+              "keywords": ["Infinix GT 30 Pro price", "Dimensity 8350 Ultimate"]
+            },
+            {
+              "cluster_name": "Infinix Zero 30 Price",
+              "url": "https://gadgetph.com/infinix-zero-30-price-philippines/",
+              "keywords": ["Infinix Zero 30 price", "144Hz AMOLED"]
+            }
+          ]
+        },
+        {
+          "cluster_name": "iPhone Phone Hub 2025",
+          "url": "https://gadgetph.com/smartphones/iphone/hub/",
+          "keywords": ["iPhone Phone Hub", "latest iPhone prices"],
+          "clusters": [
+            {
+              "cluster_name": "Apple News & Updates",
+              "url": "https://gadgetph.com/apple-news-updates/",
+              "keywords": ["apple news", "latest iphone news"]
+            },
+            {
+              "cluster_name": "iPhone Phones Review",
+              "url": "https://gadgetph.com/iphone-phones-review/",
+              "keywords": ["iphone review", "apple review"]
+            },
+            {
+              "cluster_name": "iPhone Price List 2025",
+              "url": "https://gadgetph.com/page-categories/iphone-prices/",
+              "keywords": ["iPhone price list Philippines", "latest iPhone price"]
+            },
+            {
+              "cluster_name": "iPhone Comparisons 2025",
+              "url": "https://gadgetph.com/iphone-comparisons/",
+              "keywords": ["iphone comparisons", "iphone vs"]
+            },
+            {
+              "cluster_name": "iPhone 17 Price",
+              "url": "https://gadgetph.com/iphone-17-price-philippines/",
+              "keywords": ["iPhone 17 price philippines", "iOS 18"]
+            },
+            {
+              "cluster_name": "iPhone 16 Pro Max Price",
+              "url": "https://gadgetph.com/apple-iphone-16-pro-max-price-philippines/",
+              "keywords": ["iPhone 16 Pro Max price", "A18 Pro Chip"]
+            }
+          ]
+        },
+        {
+          "cluster_name": "itel Phone Hub 2025",
+          "url": "https://gadgetph.com/smartphones/itel/hub/",
+          "keywords": ["itel Phone Hub", "latest itel phones"],
+          "clusters": [
+            {
+              "cluster_name": "itel News & Updates",
+              "url": "https://gadgetph.com/itel-news-updates/",
+              "keywords": ["itel news", "latest itel updates"]
+            },
+            {
+              "cluster_name": "itel Phones Review",
+              "url": "https://gadgetph.com/itel-phones-review/",
+              "keywords": ["itel review", "itel phone review"]
+            },
+            {
+              "cluster_name": "itel Price List 2025",
+              "url": "https://gadgetph.com/page-categories/itel-phone-prices/",
+              "keywords": ["itel price list Philippines", "latest itel price"]
+            },
+            {
+              "cluster_name": "itel Phone Comparisons 2025",
+              "url": "https://gadgetph.com/itel-comparisons/",
+              "keywords": ["itel phone comparisons", "itel vs"]
+            },
+            {
+              "cluster_name": "itel City 100 Price",
+              "url": "https://gadgetph.com/itel-city-100-price-philippines/",
+              "keywords": ["itel City 100 price", "90Hz Display"]
+            }
+          ]
+        },
+        {
+          "cluster_name": "Meizu Phone Hub 2025",
+          "url": "https://gadgetph.com/smartphones/meizu/hub/",
+          "keywords": ["Meizu Phone Hub", "latest Meizu phones"],
+          "clusters": [
+            {
+              "cluster_name": "Meizu News & Updates",
+              "url": "https://gadgetph.com/meizu-news-updates/",
+              "keywords": ["meizu news", "latest meizu updates"]
+            },
+            {
+              "cluster_name": "Meizu Phones Review",
+              "url": "https://gadgetph.com/meizu-phones-review/",
+              "keywords": ["meizu review", "meizu phone review"]
+            },
+            {
+              "cluster_name": "Meizu Price List 2025",
+              "url": "https://gadgetph.com/page-categories/meizu-phone-prices/",
+              "keywords": ["Meizu price list Philippines", "latest Meizu price"]
+            },
+            {
+              "cluster_name": "Meizu Phone Comparisons 2025",
+              "url": "https://gadgetph.com/meizu-comparisons/",
+              "keywords": ["meizu phone comparisons", "meizu vs"]
+            },
+            {
+              "cluster_name": "Meizu Note 22 Pro Price",
+              "url": "https://gadgetph.com/meizu-note-22-pro-price-philippines/",
+              "keywords": ["Meizu Note 22 Pro price", "Snapdragon 7s Gen 3"]
+            },
+            {
+              "cluster_name": "Meizu Note 22 Price",
+              "url": "https://gadgetph.com/meizu-note-22-price-philippines/",
+              "keywords": ["Meizu Note 22 price", "6600mAh Battery"]
+            }
+          ]
+        },
+        {
+          "cluster_name": "Motorola Phone Hub 2025",
+          "url": "https://gadgetph.com/smartphones/motorola/hub/",
+          "keywords": ["Motorola Phone Hub", "latest Motorola phones"],
+          "clusters": [
+            {
+              "cluster_name": "Motorola News & Updates",
+              "url": "https://gadgetph.com/motorola-news-updates/",
+              "keywords": ["motorola news", "latest moto updates"]
+            },
+            {
+              "cluster_name": "Motorola Phones Review",
+              "url": "https://gadgetph.com/motorola-phones-review/",
+              "keywords": ["motorola review", "moto review"]
+            },
+            {
+              "cluster_name": "Motorola Price List 2025",
+              "url": "https://gadgetph.com/page-categories/motorola-phone-prices/",
+              "keywords": ["Motorola price list Philippines", "latest Moto price"]
+            },
+            {
+              "cluster_name": "Motorola Phone Comparisons 2025",
+              "url": "https://gadgetph.com/motorola-comparisons/",
+              "keywords": ["motorola phone comparisons", "moto vs"]
+            },
+            {
+              "cluster_name": "Motorola Razr 60 Ultra Price",
+              "url": "https://gadgetph.com/motorola-razr-60-ultra-price-features/",
+              "keywords": ["Motorola Razr 60 Ultra price", "Snapdragon 8 Elite"]
+            }
+          ]
+        },
+        {
+          "cluster_name": "OnePlus Phone Hub 2025",
+          "url": "https://gadgetph.com/smartphones/oneplus/hub/",
+          "keywords": ["OnePlus Phone Hub", "latest OnePlus phones"],
+          "clusters": [
+            {
+              "cluster_name": "OnePlus News & Updates",
+              "url": "https://gadgetph.com/oneplus-news-updates/",
+              "keywords": ["oneplus news", "latest oneplus updates"]
+            },
+            {
+              "cluster_name": "OnePlus Phones Review",
+              "url": "https://gadgetph.com/oneplus-phones-review/",
+              "keywords": ["oneplus review", "oneplus phone review"]
+            },
+            {
+              "cluster_name": "OnePlus Price List 2025",
+              "url": "https://gadgetph.com/page-categories/oneplus-phone-prices/",
+              "keywords": ["OnePlus price list Philippines", "latest OnePlus price"]
+            },
+            {
+              "cluster_name": "OnePlus Phone Comparisons 2025",
+              "url": "https://gadgetph.com/oneplus-comparisons/",
+              "keywords": ["oneplus phone comparisons", "oneplus vs"]
+            },
+            {
+              "cluster_name": "OnePlus 13s Price",
+              "url": "https://gadgetph.com/oneplus-13s-price-philippines/",
+              "keywords": ["OnePlus 13s price", "Snapdragon 8 Elite"]
+            },
+            {
+              "cluster_name": "OnePlus 13T Price",
+              "url": "https://gadgetph.com/oneplus-13t-price-philippines/",
+              "keywords": ["OnePlus 13T price", "1TB UFS 4.0"]
+            }
+          ]
+        },
+        {
+          "cluster_name": "Oppo Phone Hub 2025",
+          "url": "https://gadgetph.com/smartphones/oppo/hub/",
+          "keywords": ["Oppo Phone Hub", "latest Oppo phones"],
+          "clusters": [
+            {
+              "cluster_name": "Oppo News & Updates",
+              "url": "https://gadgetph.com/oppo-news-updates/",
+              "keywords": ["oppo news", "latest oppo updates"]
+            },
+            {
+              "cluster_name": "Oppo Phones Review",
+              "url": "https://gadgetph.com/oppo-phones-review/",
+              "keywords": ["oppo review", "oppo phone review"]
+            },
+            {
+              "cluster_name": "Oppo Price List 2025",
+              "url": "https://gadgetph.com/page-categories/oppo-phone-prices/",
+              "keywords": ["Oppo price list Philippines", "latest Oppo price"]
+            },
+            {
+              "cluster_name": "Oppo Phone Comparisons 2025",
+              "url": "https://gadgetph.com/oppo-comparisons/",
+              "keywords": ["oppo phone comparisons", "oppo vs"]
+            },
+            {
+              "cluster_name": "Oppo A5x Price",
+              "url": "https://gadgetph.com/oppo-a5x-price-philippines/",
+              "keywords": ["Oppo A5x price", "6000mAh Battery"]
+            },
+            {
+              "cluster_name": "Oppo Reno14 Pro Price",
+              "url": "https://gadgetph.com/oppo-reno14-pro-price-philippines/",
+              "keywords": ["Oppo Reno14 Pro price", "Dimensity 8450"]
+            }
+          ]
+        },
+        {
+          "cluster_name": "Realme Phone Hub 2025",
+          "url": "https://gadgetph.com/smartphones/realme/hub/",
+          "keywords": ["Realme Phone Hub", "latest Realme phones"],
+          "clusters": [
+            {
+              "cluster_name": "Realme News & Updates",
+              "url": "https://gadgetph.com/realme-news-updates/",
+              "keywords": ["realme news", "latest realme updates"]
+            },
+            {
+              "cluster_name": "Realme Phones Review",
+              "url": "https://gadgetph.com/realme-phones-review/",
+              "keywords": ["realme review", "realme phone review"]
+            },
+            {
+              "cluster_name": "Realme Price List 2025",
+              "url": "https://gadgetph.com/page-categories/realme-phone-prices/",
+              "keywords": ["Realme price list Philippines", "latest Realme price"]
+            },
+            {
+              "cluster_name": "Realme Phone Comparisons 2025",
+              "url": "https://gadgetph.com/realme-comparisons/",
+              "keywords": ["realme phone comparisons", "realme vs"]
+            },
+            {
+              "cluster_name": "Realme Narzo 80 Lite Price",
+              "url": "https://gadgetph.com/realme-narzo-80-lite-price-philippines/",
+              "keywords": ["Realme Narzo 80 Lite price", "Dimensity 6300"]
+            },
+            {
+              "cluster_name": "Realme GT 7T Price",
+              "url": "https://gadgetph.com/realme-gt-7t-price-philippines/",
+              "keywords": ["Realme GT 7T price", "7000mAh Battery"]
+            }
+          ]
+        },
+        {
+          "cluster_name": "Sony Phone Hub 2025",
+          "url": "https://gadgetph.com/smartphones/sony/hub/",
+          "keywords": ["Sony Phone Hub", "latest Sony phones"],
+          "clusters": [
+            {
+              "cluster_name": "Sony News & Updates",
+              "url": "https://gadgetph.com/sony-news-updates/",
+              "keywords": ["sony news", "latest xperia news"]
+            },
+            {
+              "cluster_name": "Sony Phones Review",
+              "url": "https://gadgetph.com/sony-phones-review/",
+              "keywords": ["sony review", "xperia review"]
+            },
+            {
+              "cluster_name": "Sony Price List 2025",
+              "url": "https://gadgetph.com/page-categories/sony-phone-prices/",
+              "keywords": ["Sony price list Philippines", "latest Sony price"]
+            },
+            {
+              "cluster_name": "Sony Phone Comparisons 2025",
+              "url": "https://gadgetph.com/sony-comparisons/",
+              "keywords": ["sony phone comparisons", "xperia vs"]
+            },
+            {
+              "cluster_name": "Sony Xperia 1 VII Price",
+              "url": "https://gadgetph.com/sony-xperia-1-vii-price-philippines/",
+              "keywords": ["Sony Xperia 1 VII price", "4K OLED"]
+            }
+          ]
+        },
+        {
+          "cluster_name": "Tecno Phone Hub 2025",
+          "url": "https://gadgetph.com/smartphones/tecno/hub/",
+          "keywords": ["Tecno Phone Hub", "latest Tecno phones"],
+          "clusters": [
+            {
+              "cluster_name": "Tecno News & Updates",
+              "url": "https://gadgetph.com/tecno-news-updates/",
+              "keywords": ["tecno news", "latest tecno updates"]
+            },
+            {
+              "cluster_name": "Tecno Phones Review",
+              "url": "https://gadgetph.com/tecno-phones-review/",
+              "keywords": ["tecno review", "tecno phone review"]
+            },
+            {
+              "cluster_name": "Tecno Price List 2025",
+              "url": "https://gadgetph.com/page-categories/tecno-phone-prices/",
+              "keywords": ["Tecno price list Philippines", "latest Tecno price"]
+            },
+            {
+              "cluster_name": "Tecno Phone Comparisons 2025",
+              "url": "https://gadgetph.com/tecno-comparisons/",
+              "keywords": ["tecno phone comparisons", "tecno vs"]
+            },
+            {
+              "cluster_name": "Tecno Camon 40 Pro 5G Price",
+              "url": "https://gadgetph.com/tecno-camon-40-pro-5g-price-philippines/",
+              "keywords": ["Tecno Camon 40 Pro price", "144Hz AMOLED"]
+            }
+          ]
+        },
+        {
+          "cluster_name": "Ulefone Hub 2025",
+          "url": "https://gadgetph.com/smartphones/ulefone/hub/",
+          "keywords": ["Ulefone Hub", "Ulefone rugged phones"],
+          "clusters": [
+            {
+              "cluster_name": "Ulefone News & Updates",
+              "url": "https://gadgetph.com/ulefone-news-updates/",
+              "keywords": ["ulefone news", "latest ulefone updates"]
+            },
+            {
+              "cluster_name": "Ulefone Phones Review",
+              "url": "https://gadgetph.com/ulefone-phones-review/",
+              "keywords": ["ulefone review", "ulefone phone review"]
+            },
+            {
+              "cluster_name": "Ulefone Price List 2025",
+              "url": "https://gadgetph.com/page-categories/ulefone-prices/",
+              "keywords": ["Ulefone price list Philippines", "latest Ulefone price"]
+            },
+            {
+              "cluster_name": "Ulefone Phone Comparisons 2025",
+              "url": "https://gadgetph.com/ulefone-comparisons/",
+              "keywords": ["ulefone phone comparisons", "ulefone vs"]
+            },
+            {
+              "cluster_name": "Ulefone Armor 28 Pro Price",
+              "url": "https://gadgetph.com/ulefone-armor-28-pro-price-philippines/",
+              "keywords": ["Ulefone Armor 28 Pro price", "Night Vision Camera"]
+            }
+          ]
+        },
+        {
+          "cluster_name": "Vivo Phone Hub 2025",
+          "url": "https://gadgetph.com/smartphones/vivo/hub/",
+          "keywords": ["Vivo Phone Hub", "latest Vivo phones"],
+          "clusters": [
+            {
+              "cluster_name": "Vivo News & Updates",
+              "url": "https://gadgetph.com/vivo-news-updates/",
+              "keywords": ["vivo news", "latest vivo updates"]
+            },
+            {
+              "cluster_name": "Vivo Phones Review",
+              "url": "https://gadgetph.com/vivo-phones-review/",
+              "keywords": ["vivo review", "vivo phone review"]
+            },
+            {
+              "cluster_name": "Vivo Price List 2025",
+              "url": "https://gadgetph.com/page-categories/vivo-phone-prices/",
+              "keywords": ["Vivo price list Philippines", "latest Vivo price"]
+            },
+            {
+              "cluster_name": "Vivo Phone Comparisons 2025",
+              "url": "https://gadgetph.com/vivo-comparisons/",
+              "keywords": ["vivo phone comparisons", "vivo vs"]
+            },
+            {
+              "cluster_name": "vivo iQOO Z10R Price",
+              "url": "https://gadgetph.com/vivo-iqoo-z10r-price-philippines/",
+              "keywords": ["vivo iQOO Z10R price", "Dimensity 7400"]
+            },
+            {
+              "cluster_name": "vivo iQOO Neo 10 Price",
+              "url": "https://gadgetph.com/vivo-iqoo-neo-10-price-philippines/",
+              "keywords": ["vivo iQOO Neo 10 price", "Snapdragon 8s Gen 4"]
+            }
+          ]
+        },
+        {
+          "cluster_name": "Xiaomi Phone Hub 2025",
+          "url": "https://gadgetph.com/smartphones/xiaomi/hub/",
+          "keywords": ["Xiaomi Phone Hub", "latest Xiaomi phones"],
+          "clusters": [
+            {
+              "cluster_name": "Xiaomi News & Updates",
+              "url": "https://gadgetph.com/xiaomi-news-updates/",
+              "keywords": ["xiaomi news", "latest xiaomi updates"]
+            },
+            {
+              "cluster_name": "Xiaomi Phones Review",
+              "url": "https://gadgetph.com/xiaomi-phones-review/",
+              "keywords": ["xiaomi review", "xiaomi phone review"]
+            },
+            {
+              "cluster_name": "Xiaomi Price List 2025",
+              "url": "https://gadgetph.com/smartphones/xiaomi/price-list/",
+              "keywords": ["Xiaomi price list Philippines", "Xiaomi phone price"]
+            },
+            {
+              "cluster_name": "Xiaomi Phone Comparisons 2025",
+              "url": "https://gadgetph.com/xiaomi-comparisons/",
+              "keywords": ["xiaomi phone comparisons", "xiaomi vs"]
+            },
+            {
+              "cluster_name": "Redmi Phone Hub",
+              "url": "https://gadgetph.com/smartphones/redmi/hub/",
+              "keywords": ["Redmi Phone Hub", "latest Redmi phones"],
+              "clusters": [
+                {
+                  "cluster_name": "Redmi News & Updates",
+                  "url": "https://gadgetph.com/redmi-news-updates/",
+                  "keywords": ["redmi news", "latest redmi updates"]
+                },
+                {
+                  "cluster_name": "Redmi Phones Review",
+                  "url": "https://gadgetph.com/redmi-phones-review/",
+                  "keywords": ["redmi review", "redmi phone review"]
+                },
+                {
+                  "cluster_name": "Redmi Price List 2025",
+                  "url": "https://gadgetph.com/page-categories/redmi-phone-prices/",
+                  "keywords": ["Redmi price list Philippines", "latest Redmi price"]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "cluster_name": "Best Picks & Buying Guides",
+          "url": "https://gadgetph.com/best-picks/",
+          "keywords": [
+            "best phones 2025",
+            "top smartphones 2025",
+            "best flagship phones"
+          ],
+          "clusters": [
+            {
+              "cluster_name": "General Buying Guides",
+              "url": "https://gadgetph.com/page-categories/buying-guide/",
+              "keywords": ["smartphone buying guide", "phone buying guide"],
+              "clusters": [
+                {
+                  "cluster_name": "Smartphone Buying Guide Philippines 2025",
+                  "url": "https://gadgetph.com/smartphone-buying-guide-philippines/",
+                  "keywords": ["smartphone buying guide philippines", "how to choose a phone"]
+                },
+                {
+                  "cluster_name": "Smartphone Processor Guide 2025",
+                  "url": "https://gadgetph.com/smartphone-processor-guide/",
+                  "keywords": ["smartphone processors", "best chipsets", "snapdragon vs dimensity"]
+                }
+              ]
+            },
+            {
+              "cluster_name": "Brand-Specific Guides",
+              "url": "https://gadgetph.com/smartphones/brand-guides/",
+              "keywords": ["best samsung phones", "best xiaomi phones"],
+              "clusters": [
+                {
+                  "cluster_name": "Best Samsung Phones in 2025",
+                  "url": "https://gadgetph.com/best-samsung-phones/",
+                  "keywords": ["best samsung phones 2025", "top galaxy picks"]
+                }
+              ]
+            },
+            {
+              "cluster_name": "Phones by Feature & Use Case",
+              "url": "https://gadgetph.com/page-categories/best-smartphones/",
+              "keywords": ["best phones by feature", "best phones by use case"],
+              "clusters": [
+                {
+                  "cluster_name": "Best Foldable Phones 2025",
+                  "url": "https://gadgetph.com/best-foldable-phones-2025/",
+                  "keywords": ["best foldable phones", "top foldables"]
+                },
+                {
+                  "cluster_name": "Best Smartphones for Content Creators 2025",
+                  "url": "https://gadgetph.com/best-smartphones-for-content-creators-2025/",
+                  "keywords": ["phones for content creators", "vlogging phones"]
+                },
+                {
+                  "cluster_name": "Best AMOLED Phones 2025",
+                  "url": "https://gadgetph.com/best-amoled-phones-2025/",
+                  "keywords": ["best amoled phones", "amoled display phones"]
+                }
+              ]
+            },
+            {
+              "cluster_name": "Phones by Price Segment",
+              "url": "https://gadgetph.com/smartphones/price-segment/",
+              "keywords": [
+                "phones by price segment",
+                "phones under ₱10,000"
+              ],
+              "clusters": [
+                {
+                  "cluster_name": "Best Phones Under ₱7,000",
+                  "url": "https://gadgetph.com/phones-under-7000/",
+                  "keywords": ["best phone under 7k", "affordable phone 7k"]
+                },
+                {
+                  "cluster_name": "Best Phones Under ₱10,000",
+                  "url": "https://gadgetph.com/phones-under-10000/",
+                  "keywords": ["best phone under 10k", "budget picks"]
+                },
+                {
+                  "cluster_name": "Best Phones Under ₱15,000",
+                  "url": "https://gadgetph.com/phones-under-15000/",
+                  "keywords": ["best phone under 15k", "mid-budget picks"]
+                },
+                {
+                  "cluster_name": "Best Phones Under ₱20,000",
+                  "url": "https://gadgetph.com/phones-under-20000/",
+                  "keywords": ["best phone under 20k", "value picks"]
+                }
+              ]
+            },
+            {
+              "cluster_name": "Gaming & Performance Picks",
+              "url": "https://gadgetph.com/smartphones/gaming-phones/",
+              "keywords": ["best gaming phones", "gaming phone price"]
+            },
+            {
+                "cluster_name": "Best Power Bank Philippines 2025",
+                "url": "https://gadgetph.com/power-bank-philippines/",
+                "keywords": ["power bank Philippines", "best power bank 2025"]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "pillar_name": "Best Headphones & Wireless Earbuds 2025",
+      "url": "https://gadgetph.com/page-categories/headphones-earbuds/",
+      "keywords": ["best headphones 2025", "best wireless earbuds"],
+      "clusters": [
+        {
+          "cluster_name": "Best Noise Cancelling Headphones 2025",
+          "url": "https://gadgetph.com/best-noise-cancelling-headphones-2025/",
+          "keywords": ["noise cancelling headphones", "top ANC picks"]
+        },
+        {
+          "cluster_name": "Best Budget Wireless Earbuds 2025",
+          "url": "https://gadgetph.com/best-budget-wireless-earbuds-2025/",
+          "keywords": ["budget wireless earbuds", "earbuds under 2000"]
+        }
+      ]
+    },
+    {
+      "pillar_name": "Tablet Hub 2025",
+      "url": "https://gadgetph.com/tablets/",
+      "keywords": ["tablets", "tablet price list", "tablet reviews"],
+      "clusters": [
+        {
+          "cluster_name": "Samsung Tablet Hub",
+          "url": "https://gadgetph.com/tablets/samsung/",
+          "keywords": ["samsung tablet", "galaxy tab"]
+        },
+        {
+          "cluster_name": "Apple iPad Hub",
+          "url": "https://gadgetph.com/tablets/ipad/",
+          "keywords": ["ipad", "apple tablet"]
+        },
+        {
+          "cluster_name": "Xiaomi Tablet Hub",
+          "url": "https://gadgetph.com/tablets/xiaomi/",
+          "keywords": ["xiaomi tablet", "xiaomi pad"]
+        },
+        {
+          "cluster_name": "Huawei Tablet Hub",
+          "url": "https://gadgetph.com/tablets/huawei/",
+          "keywords": ["huawei tablet", "matepad"]
+        },
+        {
+          "cluster_name": "Realme Tablet Hub",
+          "url": "https://gadgetph.com/tablets/realme/",
+          "keywords": ["realme tablet", "realme pad"]
+        },
+        {
+          "cluster_name": "OnePlus Pad Hub",
+          "url": "https://gadgetph.com/tablets/oneplus/",
+          "keywords": ["oneplus pad", "oneplus tablet"]
+        }
+      ]
+    }
+  ]
+}

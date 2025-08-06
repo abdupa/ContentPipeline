@@ -1,7 +1,7 @@
 services:
   backend:
     build: ./backend
-    image: contentgen-backend:latest # <-- NEW: Give the image a unique name
+    image: contentgen-backend:latest
     env_file:
       - .env
     ports:
@@ -36,11 +36,14 @@ services:
     image: "redis:alpine"
     ports:
       - "6380:6379"
+    # *** THE FIX: Add a volume to persist Redis data ***
+    volumes:
+      - redis-data:/data
 
   celery-worker:
     build: ./backend
-    image: contentgen-backend:latest # <-- NEW: Use the same unique image name
-    command: celery -A tasks worker --loglevel=info
+    image: contentgen-backend:latest
+    command: celery -A celery_app.app worker --loglevel=info
     env_file:
       - .env
     volumes:
@@ -49,6 +52,11 @@ services:
     environment:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - PYTHONPATH=/app
     depends_on:
       - backend
       - redis
+
+# *** THE FIX: Define the named volume at the top level ***
+volumes:
+  redis-data:
