@@ -1,15 +1,3 @@
-// import React, { useState, useEffect, useRef } from 'react';
-// import axios from 'axios';
-// import Sidebar from './components/Sidebar.jsx';
-// import InitialUploadView from './components/InitialUploadView.jsx';
-// import AnalysisResultsView from './components/AnalysisResultsView.jsx';
-// import ContentCompleteView from './components/ContentCompleteView.jsx';
-// import DashboardView from './components/DashboardView.jsx';
-// import ScraperWizardView from './components/ScraperWizardView.jsx';
-// import ProjectsView from './components/ProjectsView.jsx';
-// import JobStatusView from './components/JobStatusView.jsx';
-// import { HelpCircle, Bell, ChevronDown } from 'lucide-react';
-
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import Sidebar from './components/Sidebar.jsx';
@@ -17,8 +5,8 @@ import DashboardView from './components/DashboardView.jsx';
 import ScraperWizardView from './components/ScraperWizardView.jsx';
 import ProjectsView from './components/ProjectsView.jsx';
 import JobStatusView from './components/JobStatusView.jsx';
-import ApprovalQueueView from './components/ApprovalQueueView.jsx'; // <-- Import new
-import ContentEditorView from './components/ContentEditorView.jsx'; // <-- Import new
+import ApprovalQueueView from './components/ApprovalQueueView.jsx';
+import ContentEditorView from './components/ContentEditorView.jsx';
 import { HelpCircle, Bell, ChevronDown } from 'lucide-react';
 
 const backendApiUrl = `http://${window.location.hostname}:8000`;
@@ -29,37 +17,39 @@ const apiClient = axios.create({
 
 const App = () => {
   const [currentView, setCurrentView] = useState('dashboard');
-  
-  // State for scraping project flow
   const [activeScrapeJobId, setActiveScrapeJobId] = useState(null);
   const [projectToEdit, setProjectToEdit] = useState(null);
-  
-  // NEW: State for the approval queue flow
   const [draftToEditId, setDraftToEditId] = useState(null);
-
   const intervalRef = useRef(null);
 
   const handleMenuItemClick = (itemName) => {
     if (intervalRef.current) clearInterval(intervalRef.current);
-
-    if (itemName === 'Dashboard') {
-      setCurrentView('dashboard');
-    } else if (itemName === 'Scrape Content') {
-      setCurrentView('projects');
-    } else if (itemName === 'Approval Queue') { // <-- NEW
-      setCurrentView('approvalQueue');
-    } else {
-      alert(`Navigating to: ${itemName}`);
-    }
+    if (itemName === 'Dashboard') setCurrentView('dashboard');
+    else if (itemName === 'Scrape Content') setCurrentView('projects');
+    else if (itemName === 'Approval Queue') setCurrentView('approvalQueue');
+    else alert(`Navigating to: ${itemName}`);
   };
 
-  const handleRunProject = async (projectId) => {
+  const handleRunProject = async (projectId, options) => {
     try {
-      const response = await apiClient.post(`/api/projects/${projectId}/run`);
+      const response = await apiClient.post(`/api/projects/${projectId}/run`, options);
       setActiveScrapeJobId(response.data.job_id);
       setCurrentView('scrapeJobStatus');
     } catch (error) {
-        alert(error.response?.data?.detail || "Failed to start project run.");
+      // *** THE FIX: Improved error message handling ***
+      let errorMessage = "An unknown error occurred. Please check the backend logs.";
+      if (error.response?.data?.detail) {
+          const detail = error.response.data.detail;
+          if (typeof detail === 'string') {
+              errorMessage = detail;
+          } else if (Array.isArray(detail)) {
+              // Format FastAPI validation errors for readability
+              errorMessage = detail.map(err => `Error in field '${err.loc[1]}': ${err.msg}`).join('\n');
+          } else {
+              errorMessage = JSON.stringify(detail);
+          }
+      }
+      alert(`Failed to start project run:\n\n${errorMessage}`);
     }
   };
 
@@ -68,19 +58,14 @@ const App = () => {
     setCurrentView('scrapeWizard');
   };
   
-  // NEW: Handler to open a draft in the editor
   const handleEditDraft = (draftId) => {
     setDraftToEditId(draftId);
     setCurrentView('contentEditor');
   };
 
   const getActiveSidebarItem = () => {
-    if (['projects', 'scrapeWizard', 'scrapeJobStatus'].includes(currentView)) {
-      return 'Scrape Content';
-    }
-    if (['approvalQueue', 'contentEditor'].includes(currentView)) { // <-- NEW
-      return 'Approval Queue';
-    }
+    if (['projects', 'scrapeWizard', 'scrapeJobStatus'].includes(currentView)) return 'Scrape Content';
+    if (['approvalQueue', 'contentEditor'].includes(currentView)) return 'Approval Queue';
     return 'Dashboard';
   };
   
@@ -88,8 +73,6 @@ const App = () => {
     switch (currentView) {
       case 'dashboard':
         return <DashboardView />;
-      
-      // Scraping Project Flow
       case 'projects':
         return <ProjectsView 
                   onCreateNew={() => { setProjectToEdit(null); setCurrentView('scrapeWizard'); }} 
@@ -103,13 +86,10 @@ const App = () => {
                 />;
       case 'scrapeJobStatus':
         return <JobStatusView jobId={activeScrapeJobId} onReset={() => setCurrentView('projects')} />;
-
-      // Approval Queue Flow
       case 'approvalQueue':
         return <ApprovalQueueView onEditDraft={handleEditDraft} />;
       case 'contentEditor':
         return <ContentEditorView draftId={draftToEditId} onBack={() => setCurrentView('approvalQueue')} />;
-
       default:
         return <DashboardView />;
     }
