@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { Loader2, Save, RefreshCw, Send, ArrowLeft, Eye, History, Image as ImageIcon } from 'lucide-react';
+import { Loader2, Save, RefreshCw, Send, ArrowLeft, Eye, History, Image as ImageIcon, RotateCcw } from 'lucide-react';
 
 const apiClient = axios.create({
   baseURL: `http://${window.location.hostname}:8000`,
@@ -69,7 +69,7 @@ const ContentEditorView = ({ draftId, onBack }) => {
   };
 
   const handleRegenerate = async () => {
-    if (window.confirm("Are you sure? This will regenerate the AI content and image, overwriting the current version (which will be saved to history).")) {
+    if (window.confirm("Are you sure? This will regenerate the AI content, overwriting the current version (which will be saved to history). The image will NOT be regenerated.")) {
       setIsRegenerating(true);
       try {
         await apiClient.post(`/api/drafts/${draft.draft_id}/regenerate`);
@@ -125,6 +125,13 @@ const ContentEditorView = ({ draftId, onBack }) => {
         setDraft(prev => ({ ...prev, featured_image_b64: base64 }));
     }
   };
+
+  // --- NEW: Function to restore an old image ---
+  const handleRestoreImage = (imageB64) => {
+    if (window.confirm("Are you sure you want to restore this image? It will replace the current featured image.")) {
+      setDraft(prev => ({ ...prev, featured_image_b64: imageB64 }));
+    }
+  };
   
   const handlePublish = async () => {
     if (window.confirm("Are you sure you want to publish this post to WordPress?")) {
@@ -166,6 +173,7 @@ const ContentEditorView = ({ draftId, onBack }) => {
         <div><label className="block font-medium text-gray-700">Tags (comma-separated)</label><input type="text" name="post_tags" value={Array.isArray(draft.post_tags) ? draft.post_tags.join(', ') : draft.post_tags} onChange={e => setDraft(prev => ({...prev, post_tags: e.target.value.split(',').map(t => t.trim())}))} className="w-full border px-3 py-2 rounded mt-1 border-gray-300"/></div>
         <div><label className="block font-medium text-gray-700">SEO Title</label><input type="text" name="seo_title" value={draft.seo_title} onChange={handleInputChange} className="w-full border px-3 py-2 rounded mt-1 border-gray-300"/></div>
         <div><label className="block font-medium text-gray-700">Meta Description</label><textarea name="meta_description" value={draft.meta_description} onChange={handleInputChange} rows="2" className="w-full border px-3 py-2 rounded mt-1 border-gray-300"/></div>
+        <div><label className="block font-medium text-gray-700">Post Excerpt</label><textarea name="post_excerpt" value={draft.post_excerpt} onChange={handleInputChange} rows="3" className="w-full border px-3 py-2 rounded mt-1 border-gray-300"/></div>
 
         <div className="pt-6 border-t">
             <label className="block text-lg font-semibold text-gray-700 mb-2">Featured Image</label>
@@ -191,13 +199,46 @@ const ContentEditorView = ({ draftId, onBack }) => {
                         <label className="block font-medium text-gray-700">Or Upload Your Own</label>
                         <input type="file" accept="image/*" onChange={handleImageUpload} className="block text-sm mt-1 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"/>
                     </div>
-                    <div>
-                        <label className="block font-medium text-gray-700">ALT Text</label>
-                        <input type="text" name="image_alt_text" value={draft.image_alt_text} onChange={handleInputChange} className="w-full border px-3 py-2 rounded mt-1 border-gray-300"/>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                            <label className="block font-medium text-gray-700">Image Title</label>
+                            <input type="text" name="image_title" value={draft.image_title} onChange={handleInputChange} className="w-full border px-3 py-2 rounded mt-1 border-gray-300"/>
+                        </div>
+                        <div>
+                            <label className="block font-medium text-gray-700">ALT Text</label>
+                            <input type="text" name="image_alt_text" value={draft.image_alt_text} onChange={handleInputChange} className="w-full border px-3 py-2 rounded mt-1 border-gray-300"/>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
+
+        {draft.image_history && draft.image_history.length > 0 && (
+          <div className="pt-6 border-t">
+            <h3 className="text-lg font-semibold text-gray-700 mb-4 flex items-center">
+              <History className="w-5 h-5 mr-2 text-gray-500"/>
+              Featured Image History
+            </h3>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+              {draft.image_history.slice().reverse().map((entry, index) => (
+                <div key={index} className="relative group border rounded-lg overflow-hidden">
+                  <img src={`data:image/png;base64,${entry.featured_image_b64}`} alt={entry.image_title} className="w-full h-32 object-cover"/>
+                  <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-60 transition-all flex flex-col items-center justify-center p-2">
+                    <button
+                      onClick={() => handleRestoreImage(entry.featured_image_b64)}
+                      className="text-white opacity-0 group-hover:opacity-100 transition-opacity text-sm font-semibold bg-blue-600 px-3 py-1 rounded-full flex items-center mb-1"
+                    >
+                      <RotateCcw className="w-3 h-3 mr-1"/> Restore
+                    </button>
+                    <p className="text-white text-xs text-center opacity-0 group-hover:opacity-100 transition-opacity">
+                      {new Date(entry.generated_at).toLocaleDateString()}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-4 border-t">
             <div>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { Loader2, CheckCircle, XCircle, FileDown } from 'lucide-react';
+import { Loader2, CheckCircle, XCircle, FileDown, Info } from 'lucide-react';
 
 const apiClient = axios.create({
   baseURL: `http://${window.location.hostname}:8000`,
@@ -14,7 +14,6 @@ const JobStatusView = ({ jobId, onReset }) => {
   useEffect(() => {
     const fetchStatus = async () => {
       try {
-        // *** FIX: Use the new, generic status endpoint ***
         const response = await apiClient.get(`/api/jobs/status/${jobId}`);
         setJobData(response.data);
 
@@ -32,7 +31,6 @@ const JobStatusView = ({ jobId, onReset }) => {
         intervalRef.current = setInterval(fetchStatus, 3000);
     }
     
-    // Cleanup function to stop polling when the component unmounts
     return () => {
         if(intervalRef.current) {
             clearInterval(intervalRef.current);
@@ -69,7 +67,19 @@ const JobStatusView = ({ jobId, onReset }) => {
   };
 
   const renderResultsTable = () => {
-    if (!jobData || !jobData.results || jobData.results.length === 0) {
+    const hasResults = jobData && jobData.results && jobData.results.length > 0;
+    
+    if (!hasResults) {
+      // *** THE FIX: Check job status before showing the message ***
+      if (jobData && jobData.status === 'complete') {
+        return (
+          <div className="text-center py-8 text-gray-600 bg-gray-50 rounded-lg">
+            <Info className="w-8 h-8 mx-auto mb-2 text-blue-500" />
+            <p className="font-semibold">No new articles were processed.</p>
+            <p className="text-sm">This can happen if all discovered articles were filtered by date or were already processed in a previous run.</p>
+          </div>
+        );
+      }
       return <p className="text-gray-500 text-center py-8">Waiting for results...</p>;
     }
     
@@ -114,13 +124,13 @@ const JobStatusView = ({ jobId, onReset }) => {
     <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-5xl border border-gray-200">
       <div className="flex justify-between items-start mb-6">
         <div>
-          <h2 className="text-2xl font-bold text-gray-800" x-text="jobData.project_name">Scraping Job Status</h2>
+          <h2 className="text-2xl font-bold text-gray-800">{jobData.project_name || "Scraping Job Status"}</h2>
           <p className="text-sm text-gray-500 font-mono">ID: {jobId}</p>
         </div>
         <button onClick={onReset} className="px-4 py-2 bg-gray-200 text-gray-800 font-semibold rounded-md hover:bg-gray-300">Back to Projects</button>
       </div>
 
-      {jobData.status === 'processing' || jobData.status === 'scraping' || jobData.status === 'starting' ? (
+      {['processing', 'scraping', 'starting'].includes(jobData.status) ? (
          <div className="mb-6">
           <div className="flex justify-between items-center mb-1">
             <span className="text-lg font-semibold text-indigo-600 flex items-center"><Loader2 className="animate-spin mr-2" /> {jobData.status.charAt(0).toUpperCase() + jobData.status.slice(1)}...</span>
@@ -136,7 +146,7 @@ const JobStatusView = ({ jobId, onReset }) => {
         <div className="mb-6 p-4 bg-green-50 text-green-700 rounded-lg flex items-center justify-between">
             <div className="flex items-center">
                 <CheckCircle className="mr-3" />
-                <span className="text-lg font-semibold">Job Complete! Extracted {jobData.results.length} items.</span>
+                <span className="text-lg font-semibold">Job Complete! Processed {jobData.total_urls} articles and generated {jobData.results.length} new drafts.</span>
             </div>
             {jobData.results && jobData.results.length > 0 && (
                 <button onClick={handleDownloadCsv} className="px-4 py-2 bg-green-600 text-white font-semibold rounded-md hover:bg-green-700 flex items-center gap-2">

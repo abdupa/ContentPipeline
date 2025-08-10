@@ -1,12 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { PlusCircle, Play, Edit, Trash2, Loader2, AlertTriangle, X } from 'lucide-react';
+import { PlusCircle, Play, Edit, Trash2, Loader2, AlertTriangle, RefreshCw, X } from 'lucide-react';
 
 const apiClient = axios.create({
   baseURL: `http://${window.location.hostname}:8000`,
 });
 
-// --- NEW: Run Options Modal Component ---
 const RunWithOptionsModal = ({ project, onClose, onConfirm }) => {
   const today = new Date().toISOString().split('T')[0];
   const [targetDate, setTargetDate] = useState(today);
@@ -73,10 +72,9 @@ const ProjectsView = ({ onCreateNew, onRunProject, onEditProject }) => {
   const [projects, setProjects] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
-  
-  // --- NEW: State for the modal ---
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [projectToRun, setProjectToRun] = useState(null);
+  const [isRefreshing, setIsRefreshing] = useState(false); // <-- NEW
 
   useEffect(() => {
     const fetchProjects = async () => {
@@ -95,7 +93,6 @@ const ProjectsView = ({ onCreateNew, onRunProject, onEditProject }) => {
     fetchProjects();
   }, []);
 
-  // --- NEW: Handlers for the modal ---
   const handleOpenModal = (project) => {
     setProjectToRun(project);
     setIsModalOpen(true);
@@ -107,8 +104,21 @@ const ProjectsView = ({ onCreateNew, onRunProject, onEditProject }) => {
   };
 
   const handleConfirmRun = (projectId, options) => {
-    onRunProject(projectId, options); // Pass options to parent handler
+    onRunProject(projectId, options);
     handleCloseModal();
+  };
+
+  // --- NEW: Handler for the refresh button ---
+  const handleRefreshDatabase = async () => {
+    setIsRefreshing(true);
+    try {
+      const response = await apiClient.post('/api/data/refresh-products');
+      alert(response.data.message);
+    } catch (err) {
+      alert("Failed to start the database refresh task. Check the backend logs.");
+    } finally {
+      setIsRefreshing(false);
+    }
   };
 
   if (isLoading) {
@@ -127,7 +137,6 @@ const ProjectsView = ({ onCreateNew, onRunProject, onEditProject }) => {
 
   return (
     <div className="w-full max-w-6xl">
-      {/* --- NEW: Render modal when open --- */}
       {isModalOpen && (
         <RunWithOptionsModal
           project={projectToRun}
@@ -141,9 +150,21 @@ const ProjectsView = ({ onCreateNew, onRunProject, onEditProject }) => {
           <h1 className="text-3xl font-extrabold text-gray-800">Scraping Projects</h1>
           <p className="text-lg text-gray-600">Manage and run your saved scraping configurations.</p>
         </div>
-        <button onClick={onCreateNew} className="inline-flex items-center px-6 py-3 bg-indigo-600 text-white font-bold rounded-full shadow-lg hover:bg-indigo-700 transition transform hover:scale-105">
-          <PlusCircle className="w-5 h-5 mr-2" /> Create New Project
-        </button>
+        <div className="flex items-center space-x-3">
+          {/* --- NEW: Refresh Database Button --- */}
+          <button
+            onClick={handleRefreshDatabase}
+            disabled={isRefreshing}
+            className="inline-flex items-center px-4 py-2 bg-gray-100 text-gray-700 font-semibold rounded-full shadow-sm hover:bg-gray-200 disabled:bg-gray-200 disabled:cursor-not-allowed transition"
+          >
+            {isRefreshing ? <Loader2 className="w-5 h-5 mr-2 animate-spin"/> : <RefreshCw className="w-5 h-5 mr-2"/>}
+            {isRefreshing ? 'Refreshing...' : 'Refresh Product DB'}
+          </button>
+
+          <button onClick={onCreateNew} className="inline-flex items-center px-6 py-3 bg-indigo-600 text-white font-bold rounded-full shadow-lg hover:bg-indigo-700 transition transform hover:scale-105">
+            <PlusCircle className="w-5 h-5 mr-2" /> Create New Project
+          </button>
+        </div>
       </div>
 
       {projects.length === 0 ? (
@@ -172,7 +193,7 @@ const ProjectsView = ({ onCreateNew, onRunProject, onEditProject }) => {
               </div>
               <div className="pt-4 border-t border-gray-200 flex items-center justify-between">
                 <button
-                  onClick={() => handleOpenModal(project)} // <-- UPDATED: Open modal instead of running directly
+                  onClick={() => handleOpenModal(project)}
                   className="inline-flex items-center px-4 py-2 bg-green-600 text-white font-semibold rounded-md hover:bg-green-700 text-sm"
                 >
                   <Play className="w-4 h-4 mr-2" />Run

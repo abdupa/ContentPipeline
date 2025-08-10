@@ -3,8 +3,9 @@ import re
 import json
 import uuid
 import random
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import requests
+import dateparser
 from dotenv import load_dotenv
 from openai import OpenAI
 from playwright.sync_api import sync_playwright
@@ -23,6 +24,8 @@ BLOCK_LIST = ["google-analytics.com", "googletagmanager.com", "doubleclick.net",
 BLOCK_REGEX = re.compile(r"|".join(BLOCK_LIST))
 PRODUCT_DB_PATH = "product_database.json"
 CONTENT_MAP_PATH = "content_map.json"
+PROCESSED_URLS_KEY = "processed_source_urls"
+
 
 openai_client: OpenAI = None
 product_database: list = []
@@ -64,31 +67,115 @@ def find_mentioned_products(text_content: str) -> list:
             mentioned.append(product)
     return mentioned
 
+# --- NEW: Advanced Interlinking Function ---
+def find_related_products(primary_products: list, all_products: list, brand_limit=2, competitor_limit=2) -> list:
+    """Finds related products from the same brand and from competing brands."""
+    if not primary_products or not all_products:
+        return []
+
+    related_links = []
+    primary_product_names = {p['name'] for p in primary_products}
+    
+    # Infer brand from the first primary product's name
+    primary_brand = primary_products[0]['name'].split(' ')[0]
+
+    # Find other products from the same brand
+    same_brand_products = [
+        p for p in all_products 
+        if p['name'].startswith(primary_brand) and p['name'] not in primary_product_names
+    ]
+    if same_brand_products:
+        related_links.extend(random.sample(same_brand_products, min(len(same_brand_products), brand_limit)))
+
+    # Find products from competing brands
+    competitor_products = [
+        p for p in all_products 
+        if not p['name'].startswith(primary_brand)
+    ]
+    if competitor_products:
+        related_links.extend(random.sample(competitor_products, min(len(competitor_products), competitor_limit)))
+
+    return related_links
+
+# --- NEW: Helper to infer product type from brand ---
+def get_product_type_from_brand(brand_name: str) -> str:
+    """Infers product type (smartphone/tablet) by checking which pillar a brand belongs to."""
+    if not content_map.get('pillars'):
+        return 'smartphone' 
+    
+    for pillar in content_map['pillars']:
+        for cluster in pillar.get('clusters', []):
+            if brand_name.lower() in cluster.get('cluster_name', '').lower():
+                return pillar.get('type', 'smartphone')
+    return 'smartphone'
+
 def find_relevant_cluster(text_content: str) -> dict:
     if not content_map or not text_content: return None
-    best_match = {'score': 0, 'path': [], 'cluster': None}
+    best_match = {'score': 0, 'path': [], 'cluster': None, 'type': 'smartphone'}
     lower_text = text_content.lower()
-    def search_recursive(nodes, path):
+
+    def search_recursive(nodes, path, node_type):
         nonlocal best_match
         for node in nodes:
+            current_type = node.get('type', node_type)
             name = node.get('pillar_name') or node.get('cluster_name')
             if not name: continue
             current_path = path + [name]
             score = 0
+            # Give a higher score for matching the brand name directly
+            brand_name_in_title = name.split(' ')[0].lower()
+            if brand_name_in_title in lower_text:
+                score += 2 
             for keyword in node.get('keywords', []):
                 if re.search(r'\b' + re.escape(keyword.lower()) + r'\b', lower_text):
                     score += 1
+            
             if score > best_match['score']:
                 best_match['score'] = score
                 best_match['path'] = current_path
+                best_match['type'] = current_type
                 best_match['cluster'] = {"name": name, "url": node.get("url"), "keywords": node.get("keywords")}
+
             if 'clusters' in node:
-                search_recursive(node['clusters'], current_path)
-    search_recursive(content_map.get('pillars', []), [])
+                search_recursive(node['clusters'], current_path, current_type)
+
+    search_recursive(content_map.get('pillars', []), [], 'smartphone')
+    
     return best_match if best_match['score'] > 0 else None
 
-# --- Celery Tasks ---
+def find_contextual_ctas(html_content: str) -> dict:
+    """Finds relevant CTAs for sections of an article based on keywords."""
+    if not content_map.get('contextual_ctas') or not html_content:
+        return {}
 
+    soup = BeautifulSoup(html_content, 'html.parser')
+    headings = soup.find_all(['h2', 'h3'])
+    ctas_by_heading = {}
+
+    for i, heading in enumerate(headings):
+        section_content = ""
+        for sibling in heading.find_next_siblings():
+            if sibling.name in ['h2', 'h3']:
+                break
+            section_content += sibling.get_text(separator=' ', strip=True)
+        
+        heading_text = heading.get_text(strip=True)
+        combined_text = (heading_text + " " + section_content).lower()
+        
+        best_cta = None
+        highest_score = 0
+        for cta in content_map['contextual_ctas']:
+            score = sum(1 for keyword in cta['keywords'] if keyword in combined_text)
+            if score > highest_score:
+                highest_score = score
+                best_cta = cta # <-- THE FIX: Pass the entire CTA object
+        
+        if best_cta:
+            ctas_by_heading[heading_text] = best_cta
+    
+    return ctas_by_heading
+
+# --- Celery Tasks ---
 @celery_app.task
 def generate_preview_task(job_id: str, url: str):
     log_terminal(f"--- [PREVIEW WORKER] Starting preview job {job_id} for URL: {url} ---")
@@ -193,9 +280,6 @@ def run_project_task(self, job_id: str, project_data: dict, target_date: str = N
         page = context.new_page()
 
         try:
-            processed_urls_key = f"processed_urls:{project_data['project_id']}"
-            redis_client.delete(processed_urls_key)
-            
             job_status_json = redis_client.get(f"job:{job_id}")
             if not job_status_json: return
             job_status = json.loads(job_status_json)
@@ -222,8 +306,19 @@ def run_project_task(self, job_id: str, project_data: dict, target_date: str = N
             job_status['total_urls'] = len(article_links)
             redis_client.set(f"job:{job_id}", json.dumps(job_status))
             
+            articles_to_process_count = 0
             for item in article_links:
-                page.goto(item['source_url'], wait_until='domcontentloaded', timeout=60000)
+                source_url = item['source_url']
+                if redis_client.sismember(PROCESSED_URLS_KEY, source_url):
+                    log_terminal(f"    - Skipping duplicate URL (already processed in a past run): {source_url}")
+                    job_status_json = redis_client.get(f"job:{job_id}")
+                    if job_status_json:
+                        job_status = json.loads(job_status_json)
+                        job_status['processed_urls'] += 1
+                        redis_client.set(f"job:{job_id}", json.dumps(job_status))
+                    continue
+
+                page.goto(source_url, wait_until='domcontentloaded', timeout=60000)
                 for rule in config.get('element_rules', []):
                     try:
                         page.locator(rule['selector']).first.wait_for(timeout=5000)
@@ -235,34 +330,34 @@ def run_project_task(self, job_id: str, project_data: dict, target_date: str = N
                         item[rule['name']] = None
                 
                 should_process = False
-                if target_date:
+                date_str = item.get('date')
+
+                if date_str:
+                    article_dt = None
                     try:
-                        filter_date = datetime.strptime(target_date, '%Y-%m-%d').date()
-                        date_str = item.get('date')
-                        if date_str:
-                            article_date = datetime.strptime(date_str, '%d %B %Y').date()
-                            if article_date == filter_date:
+                        article_dt = datetime.strptime(date_str, '%d %B %Y')
+                    except ValueError:
+                        article_dt = dateparser.parse(date_str)
+                    
+                    if article_dt:
+                        article_dt = article_dt.replace(tzinfo=timezone.utc)
+                        now_utc = datetime.now(timezone.utc)
+
+                        if target_date:
+                            filter_date = datetime.strptime(target_date, '%Y-%m-%d').date()
+                            if article_dt.date() == filter_date:
                                 should_process = True
                             else:
-                                log_terminal(f"    - Skipping article, date {article_date} does not match target {filter_date}")
+                                log_terminal(f"    - Skipping article, date {article_dt.date()} does not match target {filter_date}")
                         else:
-                            log_terminal(f"    - No date found, skipping article.")
-                    except (ValueError, TypeError):
-                        log_terminal(f"    - Could not parse date, skipping.")
-                else:
-                    date_str = item.get('date')
-                    if date_str:
-                        try:
-                            article_date = datetime.strptime(date_str, '%d %B %Y').date()
-                            today = datetime.now(timezone.utc).date()
-                            if article_date == today:
+                            if now_utc - article_dt < timedelta(days=2):
                                 should_process = True
                             else:
-                                log_terminal(f"    - Skipping article from a different date: {date_str}")
-                        except ValueError:
-                            log_terminal(f"    - Could not parse date, skipping: {date_str}")
+                                log_terminal(f"    - Skipping article (older than 48 hours): {date_str}")
                     else:
-                        log_terminal(f"    - No date found, skipping article.")
+                        log_terminal(f"    - Could not parse date, skipping: {date_str}")
+                else:
+                    log_terminal(f"    - No date found, skipping article.")
                 
                 if not should_process:
                     job_status_json = redis_client.get(f"job:{job_id}")
@@ -272,11 +367,17 @@ def run_project_task(self, job_id: str, project_data: dict, target_date: str = N
                         redis_client.set(f"job:{job_id}", json.dumps(job_status))
                     continue
                 
-                if not redis_client.sismember(processed_urls_key, item['source_url']):
-                    generate_content_from_template_task.delay(job_id, item, project_data['llm_prompt_template'])
-                    redis_client.sadd(processed_urls_key, item['source_url'])
-                else:
-                    log_terminal(f"--- [RUNNER] Skipping duplicate URL: {item['source_url']} ---")
+                articles_to_process_count += 1
+                generate_content_from_template_task.delay(job_id, item, project_data['llm_prompt_template'])
+            
+            if articles_to_process_count == 0:
+                final_job_status_json = redis_client.get(f"job:{job_id}")
+                if final_job_status_json:
+                    final_job_status = json.loads(final_job_status_json)
+                    final_job_status['status'] = 'complete'
+                    redis_client.set(f"job:{job_id}", json.dumps(final_job_status))
+                    log_terminal(f"🎉 Job {job_id} finished. No new articles were found to process.")
+
         except Exception as e:
             log_terminal(f"❌ Critical error during scraping phase for job {job_id}: {e}")
         finally:
@@ -289,24 +390,36 @@ def generate_content_from_template_task(self, job_id: str, scraped_data: dict, l
     log_terminal(f"--- [GENERATOR] Starting intelligent generation for URL: {scraped_data['source_url']} ---")
     try:
         full_text_content = f"{scraped_data.get('title', '')}\n{scraped_data.get('article_html', '')}"
+        
+        # --- UPDATED: Use new interlinking logic ---
         mentioned_products = find_mentioned_products(full_text_content)
+        related_products = find_related_products(mentioned_products, product_database)
         relevant_cluster = find_relevant_cluster(full_text_content)
+        
         log_terminal(f"    - Found {len(mentioned_products)} mentioned products.")
+        log_terminal(f"    - Found {len(related_products)} related/competitor products for interlinking.")
         if relevant_cluster:
             log_terminal(f"    - Matched to content cluster: {' -> '.join(relevant_cluster['path'])}")
         else:
             log_terminal("    - No specific content cluster matched.")
+
         final_prompt = llm_prompt_template
-        final_prompt = final_prompt.replace('{title}', scraped_data.get('title', 'N/A'))
-        final_prompt = final_prompt.replace('{article_html}', scraped_data.get('article_html', 'N/A'))
-        final_prompt = final_prompt.replace('{source_url}', scraped_data.get('source_url', ''))
-        product_facts_md = "\n".join([f"- **{p['name']}**: Price: {p['price']}, URL: {p['url']}" for p in mentioned_products]) if mentioned_products else "None"
+        final_prompt = final_prompt.replace('{source_article_html}', scraped_data.get('article_html', 'N/A'))
+        
+        product_facts_md = "\n".join([f"- **{p['name']}**: URL: {p['url']}" for p in mentioned_products]) if mentioned_products else "None"
         final_prompt = final_prompt.replace('{product_facts}', product_facts_md)
+
+        # NEW: Add related product links to the prompt
+        related_links_md = "\n".join([f"- **{p['name']}**: URL: {p['url']}" for p in related_products]) if related_products else "None"
+        final_prompt = final_prompt.replace('{related_product_links}', related_links_md)
+
         cluster_context_md = f"- **Name**: {relevant_cluster['cluster']['name']}\n- **URL**: {relevant_cluster['cluster']['url']}" if relevant_cluster else "None"
         final_prompt = final_prompt.replace('{seo_cluster_context}', cluster_context_md)
         
         response = openai_client.chat.completions.create(
-            model="gpt-4o",
+            # model="gpt-4.1",
+            # model="gpt-4o",
+            model="gpt-5",
             messages=[{"role": "user", "content": final_prompt}],
             response_format={"type": "json_object"},
         )
@@ -316,6 +429,7 @@ def generate_content_from_template_task(self, job_id: str, scraped_data: dict, l
         try:
             log_terminal(f"🎨 Generating initial featured image...")
             image_response = openai_client.images.generate(
+                # model="gpt-image-1", prompt=ai_json_response["featured_image_prompt"],
                 model="dall-e-3", prompt=ai_json_response["featured_image_prompt"],
                 n=1, size="1024x1024", response_format="b64_json"
             )
@@ -332,12 +446,15 @@ def generate_content_from_template_task(self, job_id: str, scraped_data: dict, l
             "original_content": scraped_data,
             "llm_prompt_template": llm_prompt_template,
             "content_history": [],
+            "image_history": [],
             "wordpress_post_id": None,
             "featured_image_b64": image_b64,
             **ai_json_response
         }
         redis_client.set(f"draft:{draft_id}", json.dumps(draft_data))
         redis_client.sadd("drafts_set", draft_id)
+        
+        redis_client.sadd(PROCESSED_URLS_KEY, scraped_data['source_url'])
         log_terminal(f"✅ Saved new intelligent content as draft: {draft_id}")
         
         job_status_json = redis_client.get(f"job:{job_id}")
@@ -384,26 +501,40 @@ def regenerate_content_task(self, draft_id: str):
         content_history.append(history_entry)
         draft_data["content_history"] = content_history
 
+        # --- UPDATED: Use new interlinking logic in regeneration task ---
         full_text_content = f"{scraped_data.get('title', '')}\n{scraped_data.get('article_html', '')}"
         mentioned_products = find_mentioned_products(full_text_content)
+        related_products = find_related_products(mentioned_products, product_database)
         relevant_cluster = find_relevant_cluster(full_text_content)
+
         final_prompt = llm_prompt_template
-        final_prompt = final_prompt.replace('{title}', scraped_data.get('title', 'N/A'))
-        final_prompt = final_prompt.replace('{article_html}', scraped_data.get('article_html', 'N/A'))
-        final_prompt = final_prompt.replace('{source_url}', scraped_data.get('source_url', ''))
-        product_facts_md = "\n".join([f"- **{p['name']}**: Price: {p['price']}, URL: {p['url']}" for p in mentioned_products]) if mentioned_products else "None"
+        final_prompt = final_prompt.replace('{source_article_html}', scraped_data.get('article_html', 'N/A'))
+        product_facts_md = "\n".join([f"- **{p['name']}**: URL: {p['url']}" for p in mentioned_products]) if mentioned_products else "None"
         final_prompt = final_prompt.replace('{product_facts}', product_facts_md)
+        related_links_md = "\n".join([f"- **{p['name']}**: URL: {p['url']}" for p in related_products]) if related_products else "None"
+        final_prompt = final_prompt.replace('{related_product_links}', related_links_md)
         cluster_context_md = f"- **Name**: {relevant_cluster['cluster']['name']}\n- **URL**: {relevant_cluster['cluster']['url']}" if relevant_cluster else "None"
         final_prompt = final_prompt.replace('{seo_cluster_context}', cluster_context_md)
 
         response = openai_client.chat.completions.create(
-            model="gpt-4o",
+            # model="gpt-4.1",
+            # model="gpt-4o",
+            model="gpt-5",
             messages=[{"role": "user", "content": final_prompt}],
             response_format={"type": "json_object"},
         )
         ai_json_response = json.loads(response.choices[0].message.content)
 
-        draft_data.update(ai_json_response)
+        # *** THE FIX: Add post_excerpt to the list of fields to update ***
+        fields_to_update = [
+            'focus_keyphrase', 'seo_title', 'meta_description', 'slug', 
+            'post_category', 'post_tags', 'post_title', 'post_excerpt', 
+            'featured_image_prompt', 'image_alt_text', 'image_title', 'post_content_html'
+        ]
+        for field in fields_to_update:
+            if field in ai_json_response:
+                draft_data[field] = ai_json_response[field]
+        
         draft_data["generated_at"] = datetime.now(timezone.utc).isoformat()
         
         redis_client.set(f"draft:{draft_id}", json.dumps(draft_data))
@@ -426,8 +557,20 @@ def regenerate_image_task(self, job_id: str, draft_id: str):
 
     try:
         draft_data = json.loads(draft_json)
-        prompt = draft_data.get("featured_image_prompt")
+        
+        if draft_data.get("featured_image_b64"):
+            image_history_entry = {
+                "featured_image_b64": draft_data.get("featured_image_b64"),
+                "image_title": draft_data.get("image_title"),
+                "generated_at": draft_data.get("generated_at")
+            }
+            image_history = draft_data.get("image_history", [])
+            if not isinstance(image_history, list):
+                image_history = []
+            image_history.append(image_history_entry)
+            draft_data["image_history"] = image_history
 
+        prompt = draft_data.get("featured_image_prompt")
         if not prompt:
             log_terminal(f"❌ Draft {draft_id} has no image prompt.")
             redis_client.set(f"job:{job_id}", json.dumps({"job_id": job_id, "status": "failed", "error": "Image prompt is empty."}))
@@ -435,12 +578,14 @@ def regenerate_image_task(self, job_id: str, draft_id: str):
 
         log_terminal(f"🎨 Regenerating image with prompt: '{prompt}'")
         image_response = openai_client.images.generate(
+            # model="gpt-image-1", prompt=prompt,
             model="dall-e-3", prompt=prompt,
             n=1, size="1024x1024", response_format="b64_json"
         )
         image_b64 = image_response.data[0].b64_json
 
         draft_data["featured_image_b64"] = image_b64
+        draft_data["generated_at"] = datetime.now(timezone.utc).isoformat()
         redis_client.set(f"draft:{draft_id}", json.dumps(draft_data))
         
         redis_client.set(f"job:{job_id}", json.dumps({"job_id": job_id, "status": "complete"}))

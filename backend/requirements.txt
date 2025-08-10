@@ -11,3 +11,4 @@ Pillow
 uvicorn
 python-multipart
 woocommerce
+dateparser

@@ -64,6 +64,7 @@ class Draft(BaseModel):
     original_content: dict
     llm_prompt_template: str
     content_history: List[Dict[str, Any]] = []
+    image_history: List[Dict[str, Any]] = [] # <-- NEW
     wordpress_post_id: Optional[int] = None
     featured_image_b64: Optional[str] = None
     focus_keyphrase: str
@@ -73,6 +74,7 @@ class Draft(BaseModel):
     post_category: str
     post_tags: List[str]
     post_title: str
+    post_excerpt: str # <-- NEW
     featured_image_prompt: str
     image_alt_text: str
     image_title: str
@@ -194,20 +196,26 @@ async def publish_draft(draft_id: str):
         image_data = base64.b64decode(image_b64)
         image_name = f"{draft_data['slug']}.png"
         
-        log_terminal("⬆️ Uploading image to WordPress...")
-        upload_url = f"{WP_URL}/wp-json/wp/v2/media"
+        log_terminal("⬆️ Uploading image to WordPress with metadata...")
+        upload_url = f"{WP_URL.rstrip('/')}/wp-json/wp/v2/media"
         
         headers = {
             'User-Agent': 'Mozilla/5.0',
             'Content-Disposition': f'attachment; filename="{image_name}"',
-            'Content-Type': 'image/png'
         }
 
         try:
+            files = {'file': (image_name, image_data, 'image/png')}
+            media_payload = {
+                'title': draft_data.get('image_title'),
+                'alt_text': draft_data.get('image_alt_text'),
+                'status': 'publish'
+            }
             upload_response = requests.post(
                 upload_url, 
                 headers=headers, 
-                data=image_data, 
+                files=files,
+                data=media_payload,
                 auth=auth_tuple, 
                 timeout=60
             )
@@ -215,24 +223,6 @@ async def publish_draft(draft_id: str):
             media_data = upload_response.json()
             media_id = media_data['id']
             log_terminal(f"✅ Image uploaded. Media ID: {media_id}")
-
-            # *** THE FIX: Update image metadata in a separate, standard request ***
-            update_media_url = f"{WP_URL}/wp-json/wp/v2/media/{media_id}"
-            meta_payload = {
-                'title': draft_data.get('image_title'),
-                'alt_text': draft_data.get('image_alt_text'),
-                'caption': draft_data.get('image_title') # Often good to set caption too
-            }
-            meta_response = requests.post(
-                update_media_url, 
-                headers={'User-Agent': 'Mozilla/5.0'}, 
-                json=meta_payload, 
-                auth=auth_tuple
-            )
-            if meta_response.status_code == 200:
-                log_terminal(f"✅ Successfully updated metadata for Media ID: {media_id}")
-            else:
-                log_terminal(f"⚠️  Could not update metadata for Media ID: {media_id}. Status: {meta_response.status_code}")
 
         except requests.exceptions.RequestException as e:
             log_terminal("--- ❌ IMAGE UPLOAD FAILED: Detailed Server Response ---")
@@ -251,12 +241,14 @@ async def publish_draft(draft_id: str):
         post_payload = {
             'title': draft_data['post_title'],
             'content': draft_data['post_content_html'],
+            'excerpt': draft_data.get('post_excerpt'), # <-- NEW
             'status': 'draft',
             'slug': draft_data['slug'],
             'featured_media': media_id,
             'categories': [category_id] if category_id else [],
             'tags': tag_ids,
             'meta': {
+                # *** THE FIX: Send all Yoast data as standard meta fields ***
                 '_yoast_wpseo_title': draft_data.get('seo_title'),
                 '_yoast_wpseo_focuskw': draft_data.get('focus_keyphrase'),
                 '_yoast_wpseo_metadesc': draft_data.get('meta_description'),
@@ -269,11 +261,11 @@ async def publish_draft(draft_id: str):
         post_headers = {'User-Agent': 'Mozilla/5.0'}
         if existing_post_id:
             log_terminal(f"📝 Updating existing post (ID: {existing_post_id}) in WordPress...")
-            post_url = f"{WP_URL}/wp-json/wp/v2/posts/{existing_post_id}"
+            post_url = f"{WP_URL.rstrip('/')}/wp-json/wp/v2/posts/{existing_post_id}"
             post_response = requests.post(post_url, headers=post_headers, json=post_payload, auth=auth_tuple, timeout=30)
         else:
             log_terminal("📝 Creating new post in WordPress...")
-            post_url = f"{WP_URL}/wp-json/wp/v2/posts"
+            post_url = f"{WP_URL.rstrip('/')}/wp-json/wp/v2/posts"
             post_response = requests.post(post_url, headers=post_headers, json=post_payload, auth=auth_tuple, timeout=30)
         
         post_response.raise_for_status()
