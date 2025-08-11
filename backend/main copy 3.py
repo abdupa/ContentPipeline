@@ -14,7 +14,7 @@ from tasks import generate_preview_task, run_project_task, regenerate_content_ta
 from data_tasks import update_product_database_task
 from openai import OpenAI
 from phone_tasks import run_phone_scraper_task
-# from trending_post_tasks import generate_weekly_trending_post_task
+from trending_post_tasks import generate_weekly_trending_post_task
 
 
 

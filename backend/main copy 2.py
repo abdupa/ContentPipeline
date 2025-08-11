@@ -14,8 +14,6 @@ from tasks import generate_preview_task, run_project_task, regenerate_content_ta
 from data_tasks import update_product_database_task
 from openai import OpenAI
 from phone_tasks import run_phone_scraper_task
-# from trending_post_tasks import generate_weekly_trending_post_task
-
 
 
 app = FastAPI()
@@ -305,11 +303,9 @@ async def publish_draft(draft_id: str):
 @app.post("/api/request-page-preview/")
 async def request_page_preview(payload: dict):
     url = payload.get("url")
-    project_type = payload.get("project_type", "standard_article")
     if not url: raise HTTPException(status_code=400, detail="URL is required.")
-    
     job_id = f"preview_{uuid.uuid4().hex[:10]}"
-    generate_preview_task.delay(job_id, url, project_type)
+    generate_preview_task.delay(job_id, url)
     return {"job_id": job_id}
 
 @app.get("/api/get-preview-result/{job_id}")
@@ -330,6 +326,7 @@ async def save_project(project_data: Project):
 async def get_all_projects():
     project_ids = redis_client.smembers("projects_set")
     if not project_ids: return []
+    # --- BUG FIX: Removed unnecessary .decode() call ---
     project_pipelines = redis_client.mget([f"project:{pid}" for pid in project_ids])
     projects = [json.loads(p) for p in project_pipelines if p]
     return projects

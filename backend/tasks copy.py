@@ -235,6 +235,7 @@ def generate_preview_task(job_id: str, url: str, project_type: str = 'standard_a
         function updateAndSendMessage(elements) {{
              const capturedData = Array.from(elements).map(selector => {{
                 const el = document.querySelector(selector);
+                // For smart selectors, we need to pass the original selector
                 return getElementData(el, selector);
             }}).filter(Boolean);
             console.log('[Scraper Debug] Sending message to parent:', {{ type: 'selection-updated', elements: capturedData }});
@@ -269,12 +270,12 @@ def generate_preview_task(job_id: str, url: str, project_type: str = 'standard_a
 
             // --- Standard Selection Logic ---
             let selector;
-            if (projectType === 'standard_article' && !isLink) {{
+            if (projectType === 'phone_spec_scraper') {{
+                selector = getPreciseSelector(targetEl);
+                console.log('[Scraper Debug] Phone Scraper Mode - Precise Selector:', selector);
+            }} else {{
                 selector = getSmartSelector(targetEl);
                 console.log('[Scraper Debug] Standard Article Mode - Smart Selector:', selector);
-            }} else {{
-                selector = getPreciseSelector(targetEl);
-                console.log('[Scraper Debug] Precise Selector used for:', projectType, 'isLink:', isLink);
             }}
             
             if (!selector) return;
@@ -282,9 +283,16 @@ def generate_preview_task(job_id: str, url: str, project_type: str = 'standard_a
             // --- Toggle and Update Logic ---
             document.querySelectorAll('._scraper_selected').forEach(el => el.classList.remove('_scraper_selected'));
 
-            if (currentSelection.has(selector)) {{
-                currentSelection.delete(selector);
+            if (projectType === 'phone_spec_scraper') {{
+                // Multi-select for fields
+                if (currentSelection.has(selector)) {{
+                    currentSelection.delete(selector);
+                }} else {{
+                    currentSelection.add(selector);
+                }}
             }} else {{
+                // Single-select for standard articles
+                currentSelection.clear();
                 currentSelection.add(selector);
             }}
             
@@ -328,6 +336,7 @@ def generate_preview_task(job_id: str, url: str, project_type: str = 'standard_a
             page.close()
             context.close()
             browser.close()
+
 
 @celery_app.task(bind=True)
 def run_project_task(self, job_id: str, project_data: dict, target_date: str = None, limit: int = None):

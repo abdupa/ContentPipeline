@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Loader2, Edit, AlertTriangle } from 'lucide-react';
+import { Loader2, Edit, AlertTriangle, Newspaper, ShoppingCart } from 'lucide-react';
 
 const apiClient = axios.create({
   baseURL: `http://${window.location.hostname}:8000`,
@@ -16,7 +16,9 @@ const ApprovalQueueView = ({ onEditDraft }) => {
       try {
         setIsLoading(true);
         const response = await apiClient.get('/api/drafts');
-        setDrafts(response.data);
+        // Sort drafts by generated date, newest first
+        const sortedDrafts = response.data.sort((a, b) => new Date(b.generated_at) - new Date(a.generated_at));
+        setDrafts(sortedDrafts);
         setError(null);
       } catch (err) {
         console.error("Failed to fetch drafts:", err);
@@ -52,7 +54,7 @@ const ApprovalQueueView = ({ onEditDraft }) => {
   }
 
   return (
-    <div className="w-full max-w-6xl">
+    <div className="w-full max-w-7xl">
       <div className="mb-6">
         <h1 className="text-3xl font-extrabold text-gray-800">Approval Queue</h1>
         <p className="text-lg text-gray-600">Review, edit, and publish AI-generated content.</p>
@@ -64,27 +66,41 @@ const ApprovalQueueView = ({ onEditDraft }) => {
           <p className="text-gray-500 mt-2">Run a scraping project to generate new content drafts.</p>
         </div>
       ) : (
-        <div className="bg-white rounded-lg shadow-lg border border-gray-200 overflow-hidden">
+        <div className="bg-white rounded-lg shadow-lg border border-gray-200 overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                <th scope="col" className="p-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  <input type="checkbox" className="h-4 w-4 text-indigo-600 border-gray-300 rounded" />
-                </th>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">#</th>
                 <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Title</th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Generated</th>
                 <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                 <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {drafts.map((draft) => (
+              {drafts.map((draft, index) => (
                 <tr key={draft.draft_id}>
-                  <td className="p-4"><input type="checkbox" className="h-4 w-4 text-indigo-600 border-gray-300 rounded" /></td>
-                  <td className="px-6 py-4 whitespace-nowrap font-medium text-gray-900">{draft.post_title}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{draft.post_category}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{index + 1}</td>
+                  <td className="px-6 py-4 whitespace-nowrap font-medium text-gray-900 max-w-sm truncate" title={draft.post_title}>{draft.post_title}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                     <span className={`inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full ${
+                        draft.draft_type === 'woocommerce_product' 
+                        ? 'bg-green-100 text-green-800' 
+                        : 'bg-blue-100 text-blue-800'
+                      }`}>
+                        {draft.draft_type === 'woocommerce_product' 
+                          ? <ShoppingCart className="w-3.5 h-3.5 mr-1.5"/> 
+                          : <Newspaper className="w-3.5 h-3.5 mr-1.5"/>
+                        }
+                        {draft.draft_type === 'woocommerce_product' ? 'WooCommerce' : 'WordPress Post'}
+                      </span>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    {new Date(draft.generated_at).toLocaleDateString()}
+                  </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm">
-                    <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">
+                    <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${draft.status === 'published' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
                       {draft.status}
                     </span>
                   </td>

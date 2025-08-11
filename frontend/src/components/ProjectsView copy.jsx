@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { PlusCircle, Play, Edit, Trash2, Loader2, AlertTriangle, RefreshCw, X, Smartphone, Newspaper } from 'lucide-react';
+import { PlusCircle, Play, Edit, Trash2, Loader2, AlertTriangle, RefreshCw, X } from 'lucide-react';
 
 const apiClient = axios.create({
   baseURL: `http://${window.location.hostname}:8000`,
@@ -74,37 +74,28 @@ const ProjectsView = ({ onCreateNew, onRunProject, onEditProject }) => {
   const [error, setError] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [projectToRun, setProjectToRun] = useState(null);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-
-  const fetchProjects = async () => {
-    try {
-      setIsLoading(true);
-      const response = await apiClient.get('/api/projects');
-      setProjects(response.data);
-      setError(null);
-    } catch (err) {
-      console.error("Failed to fetch projects:", err);
-      setError("Could not load projects. Please ensure the backend is running.");
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const [isRefreshing, setIsRefreshing] = useState(false); // <-- NEW
 
   useEffect(() => {
+    const fetchProjects = async () => {
+      try {
+        setIsLoading(true);
+        const response = await apiClient.get('/api/projects');
+        setProjects(response.data);
+        setError(null);
+      } catch (err) {
+        console.error("Failed to fetch projects:", err);
+        setError("Could not load projects. Please ensure the backend is running.");
+      } finally {
+        setIsLoading(false);
+      }
+    };
     fetchProjects();
   }, []);
 
-  const handleRunClick = (project) => {
-    // If it's a phone scraper, run immediately.
-    if (project.project_type === 'phone_spec_scraper') {
-      if (window.confirm(`Are you sure you want to run the scraper "${project.project_name}"?`)) {
-        onRunProject(project.project_id, {}); // Pass empty options
-      }
-    } else {
-      // Otherwise, open the options modal for standard articles.
-      setProjectToRun(project);
-      setIsModalOpen(true);
-    }
+  const handleOpenModal = (project) => {
+    setProjectToRun(project);
+    setIsModalOpen(true);
   };
 
   const handleCloseModal = () => {
@@ -117,6 +108,7 @@ const ProjectsView = ({ onCreateNew, onRunProject, onEditProject }) => {
     handleCloseModal();
   };
 
+  // --- NEW: Handler for the refresh button ---
   const handleRefreshDatabase = async () => {
     setIsRefreshing(true);
     try {
@@ -159,6 +151,7 @@ const ProjectsView = ({ onCreateNew, onRunProject, onEditProject }) => {
           <p className="text-lg text-gray-600">Manage and run your saved scraping configurations.</p>
         </div>
         <div className="flex items-center space-x-3">
+          {/* --- NEW: Refresh Database Button --- */}
           <button
             onClick={handleRefreshDatabase}
             disabled={isRefreshing}
@@ -188,27 +181,19 @@ const ProjectsView = ({ onCreateNew, onRunProject, onEditProject }) => {
             <div key={project.project_id} className="bg-white p-6 rounded-lg shadow-lg border border-gray-200 flex flex-col">
               <div className="flex-grow">
                 <div className="flex justify-between items-start">
-                  <span className={`inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full ${
-                    project.project_type === 'phone_spec_scraper' 
-                    ? 'bg-purple-100 text-purple-800' 
-                    : 'bg-blue-100 text-blue-800'
-                  }`}>
-                    {project.project_type === 'phone_spec_scraper' 
-                      ? <Smartphone className="w-3.5 h-3.5 mr-1.5"/> 
-                      : <Newspaper className="w-3.5 h-3.5 mr-1.5"/>
-                    }
-                    {project.project_type === 'phone_spec_scraper' ? 'Phone Scraper' : 'Standard Article'}
+                  <span className={`px-2 py-1 text-xs font-semibold rounded-full ${project.project_type === 'News' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800'}`}>
+                    {project.project_type}
                   </span>
                   <span className="text-xs text-gray-500">ID: {project.project_id}</span>
                 </div>
                 <h3 className="text-xl font-bold text-gray-800 mt-3">{project.project_name}</h3>
-                <p className="text-sm text-gray-600 mt-2 mb-4 truncate" title={project.scrape_config.initial_urls.join(', ')}>
-                  {project.scrape_config.initial_urls[0] || 'No initial URL'}
+                <p className="text-sm text-gray-600 mt-2 mb-4 truncate">
+                  {project.scrape_config.initial_urls[0]}
                 </p>
               </div>
               <div className="pt-4 border-t border-gray-200 flex items-center justify-between">
                 <button
-                  onClick={() => handleRunClick(project)}
+                  onClick={() => handleOpenModal(project)}
                   className="inline-flex items-center px-4 py-2 bg-green-600 text-white font-semibold rounded-md hover:bg-green-700 text-sm"
                 >
                   <Play className="w-4 h-4 mr-2" />Run

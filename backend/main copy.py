@@ -14,8 +14,6 @@ from tasks import generate_preview_task, run_project_task, regenerate_content_ta
 from data_tasks import update_product_database_task
 from openai import OpenAI
 from phone_tasks import run_phone_scraper_task
-# from trending_post_tasks import generate_weekly_trending_post_task
-
 
 
 app = FastAPI()
@@ -62,6 +60,7 @@ class Project(BaseModel):
 
 class Draft(BaseModel):
     draft_id: str
+    # --- MODIFICATION: Add draft_type field ---
     draft_type: str = 'wordpress_post'
     status: str
     source_url: str
@@ -86,15 +85,19 @@ class Draft(BaseModel):
     post_content_html: str
 
 # --- WordPress Helper Functions ---
+# This is a placeholder for your actual WooCommerce publishing logic
 def publish_to_woocommerce(draft_data: dict, wp_url: str, auth_tuple: tuple, media_id: int):
     log_terminal(f"📦 Publishing draft {draft_data['draft_id']} to WooCommerce...")
     # This would be similar to the WordPress publishing logic but would:
     # 1. Post to the /wp-json/wp/v2/products endpoint
     # 2. Set 'post_type': 'product'
     # 3. Add WooCommerce-specific metadata like _price, _sku, and product attributes for specs
+    # For now, we'll just log it.
     log_terminal("✅ Mock Published to WooCommerce.")
-    return {"link": f"{wp_url}/mock-product/{draft_data['slug']}", "id": 12345} # Return mock ID
+    return {"link": f"{wp_url}/mock-product/{draft_data['slug']}"}
 
+
+# --- WordPress Helper Functions ---
 def get_or_create_term(name: str, term_type: str, base_url: str, auth_tuple: tuple) -> Optional[int]:
     if not name:
         return None
@@ -139,7 +142,6 @@ async def get_all_drafts():
     published_ids = redis_client.smembers("published_set")
     all_ids = draft_ids.union(published_ids)
     if not all_ids: return []
-    # --- BUG FIX: Removed unnecessary .decode() call ---
     pipelines = redis_client.mget([f"draft:{did}" for did in all_ids])
     posts = [json.loads(p) for p in pipelines if p]
     return posts
@@ -206,6 +208,7 @@ async def publish_draft(draft_id: str):
     time.sleep(1)
 
     try:
+        # 1. Upload Image
         image_b64 = draft_data.get("featured_image_b64")
         image_data = base64.b64decode(image_b64)
         image_name = f"{draft_data['slug']}.png"
@@ -248,11 +251,12 @@ async def publish_draft(draft_id: str):
             log_terminal("---------------------------------------------------------")
             raise
 
+        # --- MODIFICATION: Route to correct publisher based on draft_type ---
         draft_type = draft_data.get('draft_type', 'wordpress_post')
         
         if draft_type == 'woocommerce_product':
             response_data = publish_to_woocommerce(draft_data, WP_URL, auth_tuple, media_id)
-        else:
+        else: # Default to standard WordPress post
             category_id = get_or_create_term(draft_data.get('post_category'), 'categories', WP_URL, auth_tuple)
             tag_ids = [tid for tid in [get_or_create_term(tag, 'tags', WP_URL, auth_tuple) for tag in draft_data.get('post_tags', [])] if tid is not None]
 
@@ -260,7 +264,7 @@ async def publish_draft(draft_id: str):
                 'title': draft_data['post_title'],
                 'content': draft_data['post_content_html'],
                 'excerpt': draft_data.get('post_excerpt'),
-                'status': 'publish',
+                'status': 'publish', # Publish directly now
                 'slug': draft_data['slug'],
                 'featured_media': media_id,
                 'categories': [category_id] if category_id else [],
@@ -305,11 +309,9 @@ async def publish_draft(draft_id: str):
 @app.post("/api/request-page-preview/")
 async def request_page_preview(payload: dict):
     url = payload.get("url")
-    project_type = payload.get("project_type", "standard_article")
     if not url: raise HTTPException(status_code=400, detail="URL is required.")
-    
     job_id = f"preview_{uuid.uuid4().hex[:10]}"
-    generate_preview_task.delay(job_id, url, project_type)
+    generate_preview_task.delay(job_id, url)
     return {"job_id": job_id}
 
 @app.get("/api/get-preview-result/{job_id}")
@@ -341,12 +343,13 @@ async def run_project(project_id: str, options: RunOptions):
     project_data = json.loads(project_json)
     job_id = f"run_{uuid.uuid4().hex[:10]}"
     
+    # --- MODIFICATION: Route to correct Celery task based on project_type ---
     project_type = project_data.get("project_type")
     
     if project_type == "phone_spec_scraper":
         run_phone_scraper_task.delay(job_id, project_data)
         log_terminal(f"🚀 Kicked off PHONE SCRAPER run for project '{project_data.get('project_name')}'. Job ID: {job_id}")
-    else:
+    else: # Default to the standard article task
         run_project_task.delay(
             job_id,
             project_data,
@@ -355,15 +358,12 @@ async def run_project(project_id: str, options: RunOptions):
         )
         log_terminal(f"🚀 Kicked off standard run for project '{project_data.get('project_name')}'. Job ID: {job_id}")
 
+    # Set initial job status (this part is common to all job types)
     job_status = {
         "job_id": job_id, "project_id": project_id,
         "project_name": project_data.get("project_name"),
         "status": "starting", "total_urls": 0, "processed_urls": 0,
         "results": [], "started_at": datetime.now(timezone.utc).isoformat()
-    }
-    redis_client.set(f"job:{job_id}", json.dumps(job_status))
-    
-    return {"message": "Project run started successfully.", "job_id": job_id}
 
 @app.get("/api/jobs/status/{job_id}")
 async def get_run_status(job_id: str):
