@@ -168,138 +168,146 @@ def find_contextual_ctas(html_content: str) -> dict:
 
 # --- Celery Tasks ---
 @celery_app.task
+# In backend/tasks.py
+
+@celery_app.task
+# In backend/tasks.py
+
+@celery_app.task
 def generate_preview_task(job_id: str, url: str, project_type: str = 'standard_article'):
     log_terminal(f"--- [PREVIEW WORKER] Starting preview for URL: {url} (Type: {project_type}) ---")
     
     injected_script = f"""
-<style>._scraper_selected{{outline:3px solid #f43f5e !important;box-shadow:0 0 15px rgba(244,63,94,.8);background-color:rgba(244,63,94,.2) !important}}._scraper_similar{{outline:2px dashed #3b82f6 !important;background-color:rgba(59,130,246,.15) !important}}</style><script>
-    try {{
-        const projectType = '{project_type}';
-        let currentSelection = new Set();
+        <style>
+        ._scraper_selected{{outline:3px solid #f43f5e !important;box-shadow:0 0 15px rgba(244,63,94,.8);background-color:rgba(244,63,94,.2) !important}}
+        ._scraper_similar{{outline:2px dashed #3b82f6 !important;background-color:rgba(59,130,246,.15) !important}}
+        </style>
+        <script>
+            try {{
+                let currentSelection = new Set();
 
-        function getPreciseSelector(el) {{
-            const path = []; let currentEl = el;
-            while (currentEl && currentEl.nodeType === Node.ELEMENT_NODE) {{
-                let selector = currentEl.nodeName.toLowerCase();
-                if (currentEl.id && !/[0-9]/.test(currentEl.id)) {{
-                    selector = '#' + currentEl.id; path.unshift(selector); break;
-                }} else {{
-                    let sib = currentEl, nth = 1;
-                    while (sib = sib.previousElementSibling) {{
-                        if (sib.nodeName.toLowerCase() == selector) nth++;
+                function getPreciseSelector(el) {{
+                    if (!el || el.nodeType !== Node.ELEMENT_NODE) return '';
+                    const path = []; let currentEl = el;
+                    while (currentEl) {{
+                        let selector = currentEl.nodeName.toLowerCase();
+                        if (currentEl.id && !/[0-9]/.test(currentEl.id)) {{
+                            selector = '#' + CSS.escape(currentEl.id); path.unshift(selector); break;
+                        }} else {{
+                            let sib = currentEl, nth = 1;
+                            while (sib = sib.previousElementSibling) {{
+                                if (sib.nodeName.toLowerCase() == selector) nth++;
+                            }}
+                            if (nth != 1) selector += `:nth-of-type(${{nth}})`;
+                        }}
+                        path.unshift(selector);
+                        currentEl = (currentEl.nodeName.toLowerCase() === 'html') ? null : currentEl.parentNode;
                     }}
-                    if (nth != 1) selector += `:nth-of-type(${{nth}})`;
+                    return path.join(" > ");
                 }}
-                path.unshift(selector); currentEl = currentEl.parentNode;
-            }}
-            return path.join(" > ");
-        }}
 
-        function getSmartSelector(el) {{
-            if (!(el instanceof Element)) return;
-            let parent = el;
-            while (parent) {{
-                if (parent.id && !/[0-9]/.test(parent.id)) return '#' + parent.id;
-                const classList = Array.from(parent.classList);
-                const descriptiveClasses = classList.filter(c => /(body|content|post|article|review|main)/i.test(c));
-                if (descriptiveClasses.length > 0) return descriptiveClasses.map(c => '.' + c).join('');
-                parent = parent.parentElement;
-            }}
-            return getPreciseSelector(el);
-        }}
+                // --- NEW: A "Smart Selector" function to find meaningful containers ---
+                function getSmartSelector(el) {{
+                    if (!el) return '';
+                    let currentEl = el;
+                    while (currentEl && currentEl.nodeName.toLowerCase() !== 'body') {{
+                        // Prefer an ID if it's descriptive
+                        if (currentEl.id && /(body|content|post|article|review|main)/i.test(currentEl.id)) {{
+                            return '#' + CSS.escape(currentEl.id);
+                        }}
+                        // Otherwise look for descriptive classes
+                        const classList = Array.from(currentEl.classList);
+                        const descriptiveClasses = classList.filter(c => /(body|content|post|article|review|main)/i.test(c));
+                        if (descriptiveClasses.length > 0) {{
+                            return '.' + descriptiveClasses.join('.');
+                        }}
+                        currentEl = currentEl.parentElement;
+                    }}
+                    // Fallback to the precise selector if no smart one is found
+                    return getPreciseSelector(el);
+                }}
 
-        function getSimilarSelector(el) {{
-            const parent = el.parentElement;
-            if (!parent || parent.children.length < 2) return null;
-            const tagName = el.tagName;
-            const classList = Array.from(el.classList).join('.');
-            if (!classList) return null;
-            const parentSelector = getPreciseSelector(parent);
-            const potentialSelector = `${{parentSelector}} > ${{tagName}}.${{classList}}`;
-            const similarElements = Array.from(document.querySelectorAll(potentialSelector));
-            if (similarElements.length > 1 && similarElements.includes(el)) {{
-                return potentialSelector;
-            }}
-            return null;
-        }}
+                function getSimilarSelector(el) {{
+                    const parent = el.parentElement;
+                    if (!parent || parent.children.length < 2) return null;
+                    const parentClassList = Array.from(parent.classList);
+                    if (parentClassList.length === 0) return null;
+                    const grandParentSelector = getPreciseSelector(parent.parentElement);
+                    const potentialSelector = `${{grandParentSelector}} > .${{parentClassList.join('.')}} > ${{el.tagName.toLowerCase()}}`;
+                    const similarElements = Array.from(document.querySelectorAll(potentialSelector));
+                    if (similarElements.length > 1 && similarElements.includes(el)) {{
+                        return potentialSelector;
+                    }}
+                    return null;
+                }}
 
-        function getElementData(el, selectorOverride = null) {{
-            if (!el) return null;
-            return {{
-                selector: selectorOverride || getPreciseSelector(el),
-                value: el.innerText.trim(),
-                href: el.getAttribute("href") || el.closest("a")?.getAttribute("href")
-            }};
-        }}
+                function getElementData(el, selectorOverride = null) {{
+                    if (!el) return null;
+                    return {{
+                        selector: selectorOverride || getPreciseSelector(el),
+                        value: el.innerText.trim(),
+                        href: el.getAttribute("href") || el.closest("a")?.getAttribute("href")
+                    }};
+                }}
 
-        function updateAndSendMessage(elements) {{
-             const capturedData = Array.from(elements).map(selector => {{
-                const el = document.querySelector(selector);
-                return getElementData(el, selector);
-            }}).filter(Boolean);
-            console.log('[Scraper Debug] Sending message to parent:', {{ type: 'selection-updated', elements: capturedData }});
-            window.parent.postMessage({{ type: 'selection-updated', elements: capturedData }}, '*');
-        }}
+                function updateAndSendMessage(elements) {{
+                    document.querySelectorAll('._scraper_selected, ._scraper_similar').forEach(el => el.classList.remove('_scraper_selected', '_scraper_similar'));
+                    const capturedData = Array.from(elements).map(selector => {{
+                        try {{
+                            const el = document.querySelector(selector);
+                            if (el) el.classList.add('_scraper_selected');
+                            return getElementData(el, selector);
+                        }} catch (e) {{
+                            console.error(`Could not process selector: ${{selector}}`, e);
+                            return null;
+                        }}
+                    }}).filter(Boolean);
+                    window.parent.postMessage({{ type: 'selection-updated', elements: capturedData }}, '*');
+                }}
 
-        document.addEventListener('click', function(e) {{
-            e.preventDefault(); e.stopPropagation();
-            console.log(`[Scraper Debug] Click detected. Project Type: ${{projectType}}`);
-            
-            const targetEl = e.target;
-            const isLink = targetEl.tagName === 'A' || targetEl.closest('a');
-
-            // --- Smart Suggestion Logic (Only for links in phone scraper mode) ---
-            if (projectType === 'phone_spec_scraper' && isLink) {{
-                const similarSelector = getSimilarSelector(targetEl);
-                if (similarSelector) {{
-                    const allSimilarElements = Array.from(document.querySelectorAll(similarSelector));
-                    allSimilarElements.forEach(el => el.classList.add('_scraper_similar'));
-                    targetEl.classList.add('_scraper_selected');
+                document.addEventListener('click', function(e) {{
+                    e.preventDefault(); e.stopPropagation();
                     
-                    console.log('[Scraper Debug] Found similar links, sending suggestion.');
-                    window.parent.postMessage({{
-                        type: 'selection-suggestion',
-                        single: getElementData(targetEl),
-                        all: allSimilarElements.map(el => getElementData(el)).filter(Boolean),
-                        count: allSimilarElements.length
-                    }}, '*');
-                    return; // Stop processing to wait for user choice
-                }}
-            }}
+                    const targetEl = e.target;
+                    const targetLink = targetEl.closest('a');
 
-            // --- Standard Selection Logic ---
-            let selector;
-            if (projectType === 'standard_article' && !isLink) {{
-                selector = getSmartSelector(targetEl);
-                console.log('[Scraper Debug] Standard Article Mode - Smart Selector:', selector);
-            }} else {{
-                selector = getPreciseSelector(targetEl);
-                console.log('[Scraper Debug] Precise Selector used for:', projectType, 'isLink:', isLink);
-            }}
-            
-            if (!selector) return;
+                    // Smart Suggestion Logic (Only for links in Step 2)
+                    if (targetLink) {{
+                        const similarSelector = getSimilarSelector(targetLink);
+                        if (similarSelector) {{
+                            const allSimilarElements = Array.from(document.querySelectorAll(similarSelector));
+                            document.querySelectorAll('._scraper_selected, ._scraper_similar').forEach(el => el.classList.remove('_scraper_selected', '_scraper_similar'));
+                            allSimilarElements.forEach(el => el.classList.add('_scraper_similar'));
+                            targetLink.classList.add('_scraper_selected');
+                            
+                            window.parent.postMessage({{
+                                type: 'selection-suggestion',
+                                single: getElementData(targetLink),
+                                all: allSimilarElements.map(el => getElementData(el)).filter(Boolean),
+                                count: allSimilarElements.length
+                            }}, '*');
+                            return;
+                        }}
+                    }}
 
-            // --- Toggle and Update Logic ---
-            document.querySelectorAll('._scraper_selected').forEach(el => el.classList.remove('_scraper_selected'));
+                    // --- THE FIX: Use getSmartSelector for Step 3 field selection ---
+                    const selector = getSmartSelector(targetEl);
+                    if (!selector) return;
 
-            if (currentSelection.has(selector)) {{
-                currentSelection.delete(selector);
-            }} else {{
-                currentSelection.add(selector);
-            }}
-            
-            currentSelection.forEach(sel => {{
-                const el = document.querySelector(sel);
-                if (el) el.classList.add('_scraper_selected');
-            }});
+                    if (currentSelection.has(selector)) {{
+                        currentSelection.delete(selector);
+                    }} else {{
+                        if (targetLink) {{ // If we are selecting a link (Step 2 fallback)
+                            currentSelection.clear(); // Only allow one link
+                        }}
+                        currentSelection.add(selector);
+                    }}
+                    updateAndSendMessage(currentSelection);
 
-            console.log('[Scraper Debug] Current Selection Set:', currentSelection);
-            updateAndSendMessage(currentSelection);
-
-        }}, true);
-    }} catch (err) {{ console.error('[Scraper-Iframe] A critical error occurred:', err); }}
-</script>
-"""
+                }}, true);
+            }} catch (err) {{ console.error('[Scraper-Iframe] A critical error occurred:', err); }}
+        </script>
+        """
 
     with sync_playwright() as p:
         browser = p.chromium.launch(args=["--no-sandbox"])
@@ -331,11 +339,18 @@ def generate_preview_task(job_id: str, url: str, project_type: str = 'standard_a
 
 @celery_app.task(bind=True)
 def run_project_task(self, job_id: str, project_data: dict, target_date: str = None, limit: int = None):
+    # --- LOGGING ---
     log_terminal(f"--- [RUNNER] Starting job {job_id} for project: {project_data.get('project_name')} ---")
+    try:
+        pretty_project_data = json.dumps(project_data, indent=2)
+        log_terminal(f"    - Full project data received:\n{pretty_project_data}")
+    except Exception:
+        log_terminal(f"    - Full project data received: {project_data}")
     if target_date:
         log_terminal(f"    - Target date override: {target_date}")
     if limit:
         log_terminal(f"    - Article limit: {limit}")
+    # --- END LOGGING ---
 
     with sync_playwright() as p:
         browser = p.chromium.launch(args=["--no-sandbox"])
@@ -350,26 +365,28 @@ def run_project_task(self, job_id: str, project_data: dict, target_date: str = N
             redis_client.set(f"job:{job_id}", json.dumps(job_status))
             
             config = project_data.get('scrape_config', {})
-            initial_urls = config.get('initial_urls', [])
             
-            article_links = []
-            for url in initial_urls:
-                page.goto(url, wait_until='domcontentloaded', timeout=60000)
-                news_links_selector = "div.news-item > a"
-                links = page.locator(news_links_selector).all()
-                for link_locator in links:
-                    href = link_locator.get_attribute('href')
-                    if href:
-                        full_url = urljoin(url, href)
-                        article_links.append({"source_url": full_url})
+            # --- THE FIX: The wizard already provides the final list of article URLs. ---
+            # We no longer need to search for them. We will process `initial_urls` directly.
+            article_links_from_config = config.get('initial_urls', [])
+            log_terminal(f"    - Received {len(article_links_from_config)} article URLs from the project config.")
             
+            # Create the list of items to process, ensuring each is a dictionary
+            article_links = [{"source_url": url} for url in article_links_from_config]
+
             if limit and limit > 0:
                 article_links = article_links[:limit]
+            
+            log_terminal(f"    - After applying limit, processing {len(article_links)} articles.")
+            # --- END FIX ---
 
             job_status['total_urls'] = len(article_links)
             redis_client.set(f"job:{job_id}", json.dumps(job_status))
             
             articles_to_process_count = 0
+            if not article_links:
+                 log_terminal(f"    - No articles found in config. Nothing to process.")
+            
             for item in article_links:
                 source_url = item['source_url']
                 if redis_client.sismember(PROCESSED_URLS_KEY, source_url):
@@ -380,11 +397,13 @@ def run_project_task(self, job_id: str, project_data: dict, target_date: str = N
                         job_status['processed_urls'] += 1
                         redis_client.set(f"job:{job_id}", json.dumps(job_status))
                     continue
-
+                
+                log_terminal(f"    - Now processing: {source_url}") # Added log for clarity
                 page.goto(source_url, wait_until='domcontentloaded', timeout=60000)
+
                 for rule in config.get('element_rules', []):
                     try:
-                        page.locator(rule['selector']).first.wait_for(timeout=5000)
+                        page.locator(rule['selector']).first.wait_for(timeout=10000) # Increased timeout for stability
                         if rule['name'] == 'article_html':
                             item[rule['name']] = page.locator(rule['selector']).first.inner_html()
                         else:
@@ -392,35 +411,21 @@ def run_project_task(self, job_id: str, project_data: dict, target_date: str = N
                     except Exception:
                         item[rule['name']] = None
                 
-                should_process = False
+                # --- DATE VALIDATION LOGIC ---
+                # This part now becomes the main filter.
+                should_process = True # Assume we process unless a date filter proves otherwise
                 date_str = item.get('date')
 
-                if date_str:
-                    article_dt = None
-                    try:
-                        article_dt = datetime.strptime(date_str, '%d %B %Y')
-                    except ValueError:
-                        article_dt = dateparser.parse(date_str)
-                    
+                if date_str and target_date: # Only filter if both a date and a target are present
+                    article_dt = dateparser.parse(date_str)
                     if article_dt:
-                        article_dt = article_dt.replace(tzinfo=timezone.utc)
-                        now_utc = datetime.now(timezone.utc)
-
-                        if target_date:
-                            filter_date = datetime.strptime(target_date, '%Y-%m-%d').date()
-                            if article_dt.date() == filter_date:
-                                should_process = True
-                            else:
-                                log_terminal(f"    - Skipping article, date {article_dt.date()} does not match target {filter_date}")
-                        else:
-                            if now_utc - article_dt < timedelta(days=2):
-                                should_process = True
-                            else:
-                                log_terminal(f"    - Skipping article (older than 48 hours): {date_str}")
+                        filter_date = datetime.strptime(target_date, '%Y-%m-%d').date()
+                        if article_dt.date() != filter_date:
+                            should_process = False
+                            log_terminal(f"    - Skipping article, date {article_dt.date()} does not match target {filter_date}")
                     else:
-                        log_terminal(f"    - Could not parse date, skipping: {date_str}")
-                else:
-                    log_terminal(f"    - No date found, skipping article.")
+                        log_terminal(f"    - Could not parse date '{date_str}', will process anyway.")
+                # --- END DATE VALIDATION ---
                 
                 if not should_process:
                     job_status_json = redis_client.get(f"job:{job_id}")
@@ -438,6 +443,7 @@ def run_project_task(self, job_id: str, project_data: dict, target_date: str = N
                 if final_job_status_json:
                     final_job_status = json.loads(final_job_status_json)
                     final_job_status['status'] = 'complete'
+                    final_job_status['processed_urls'] = final_job_status.get('total_urls', 0)
                     redis_client.set(f"job:{job_id}", json.dumps(final_job_status))
                     log_terminal(f"🎉 Job {job_id} finished. No new articles were found to process.")
 

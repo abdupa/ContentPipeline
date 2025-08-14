@@ -33,7 +33,10 @@ const Step1_ProjectDetails = ({ projectName, setProjectName, projectType, setPro
 };
 
 // --- Child component for Step 2 ---
-const Step2_LinkSelection = ({ urlInput, setUrlInput, onNext, onBack, projectType }) => {
+// In frontend/src/components/ScraperWizardView.jsx
+
+// --- Replace the entire Step2_LinkSelection component with this upgraded version ---
+const Step2_LinkSelection = ({ urlInput, onNext, onBack, projectType }) => {
     const [scrapeMode, setScrapeMode] = useState('interactive');
     const [capturedLinks, setCapturedLinks] = useState([]);
     const [previewHtml, setPreviewHtml] = useState("");
@@ -41,12 +44,14 @@ const Step2_LinkSelection = ({ urlInput, setUrlInput, onNext, onBack, projectTyp
     const [previewJobId, setPreviewJobId] = useState(null);
     const [currentPreviewBaseUrl, setCurrentPreviewBaseUrl] = useState(null);
     const intervalRef = useRef(null);
+    // --- NEW: State to hold the smart selection suggestion ---
     const [selectionSuggestion, setSelectionSuggestion] = useState(null);
+    const [localUrlInput, setLocalUrlInput] = useState(urlInput);
 
     const stopPolling = () => { if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; } };
 
     const handleFetchPreview = async () => {
-        const urls = urlInput.split('\n').filter(Boolean);
+        const urls = localUrlInput.split('\n').filter(Boolean);
         if (!urls[0]) { alert("Please provide at least one starting URL for the preview."); return; }
         const urlToFetch = urls[0];
         
@@ -78,9 +83,10 @@ const Step2_LinkSelection = ({ urlInput, setUrlInput, onNext, onBack, projectTyp
 
     useEffect(() => {
         const handleMessage = (event) => {
+            // --- NEW: Handle both message types from the iframe ---
             if (event.data?.type === 'selection-updated') {
                 setCapturedLinks(event.data.elements);
-                setSelectionSuggestion(null);
+                setSelectionSuggestion(null); // Clear any existing suggestion
             } else if (event.data?.type === 'selection-suggestion') {
                 setSelectionSuggestion(event.data);
             }
@@ -91,24 +97,28 @@ const Step2_LinkSelection = ({ urlInput, setUrlInput, onNext, onBack, projectTyp
 
     const handleNext = () => {
         if (scrapeMode === 'manual') {
-            if (!urlInput.trim()) { alert("Please enter at least one URL in the list."); return; }
+            if (!localUrlInput.trim()) { alert("Please enter at least one URL in the list."); return; }
+            const manualUrls = localUrlInput.split('\n').filter(Boolean);
+            onNext(manualUrls);
         } else {
             if (capturedLinks.length === 0) { alert("Please select at least one link from the preview."); return; }
-            const base = currentPreviewBaseUrl || urlInput.split('\n')[0];
+            const base = currentPreviewBaseUrl || localUrlInput.split('\n')[0];
             const capturedUrls = capturedLinks.map(link => new URL(link.href, base).href);
-            setUrlInput(capturedUrls.join('\n'));
+            onNext(capturedUrls);
         }
-        onNext();
     };
 
+    // --- NEW: Handlers for the suggestion dialog buttons ---
     const handleSelectAll = () => {
+        if (!selectionSuggestion) return;
         setCapturedLinks(selectionSuggestion.all);
-        setSelectionSuggestion(null);
+        setSelectionSuggestion(null); // Close the dialog
     };
 
     const handleSelectOne = () => {
+        if (!selectionSuggestion) return;
         setCapturedLinks([selectionSuggestion.single]);
-        setSelectionSuggestion(null);
+        setSelectionSuggestion(null); // Close the dialog
     };
 
     return (
@@ -122,17 +132,18 @@ const Step2_LinkSelection = ({ urlInput, setUrlInput, onNext, onBack, projectTyp
           {scrapeMode === 'manual' ? (
             <div>
                 <label htmlFor="url-input" className="block text-sm font-medium text-gray-700 mb-1">URLs to Scrape (one per line)</label>
-                <textarea id="url-input" value={urlInput} onChange={(e) => setUrlInput(e.target.value)} placeholder="https://www.example.com/page-1&#10;https://www.example.com/page-2" className="w-full h-64 p-2 border rounded-md font-mono text-sm"/>
+                <textarea id="url-input" value={localUrlInput} onChange={(e) => setLocalUrlInput(e.target.value)} placeholder="https://www.example.com/page-1&#10;https://www.example.com/page-2" className="w-full h-64 p-2 border rounded-md font-mono text-sm"/>
             </div>
           ) : (
             <div className="relative">
-              <p className="text-gray-600 mt-1 mb-4">Enter a starting URL below, fetch the preview, then click on links to process.</p>
+              <p className="text-gray-600 mt-1 mb-4">Enter a starting URL below, fetch the preview, then click on a single link to auto-select all similar links.</p>
               <div className="flex gap-4 mb-4">
-                <input type="text" value={urlInput.split('\n')[0] || ''} onChange={e => setUrlInput(e.target.value)} placeholder="Enter a starting URL to preview..." className="w-full p-2 border rounded-md" />
+                <input type="text" value={localUrlInput.split('\n')[0] || ''} onChange={e => setLocalUrlInput(e.target.value)} placeholder="Enter a starting URL to preview..." className="w-full p-2 border rounded-md" />
                 <button type="button" onClick={handleFetchPreview} disabled={isLoading} className="px-4 py-2 bg-blue-600 text-white font-semibold rounded-md shadow-sm hover:bg-blue-700 disabled:bg-gray-400 whitespace-nowrap">{isLoading ? <span className="flex items-center"><Loader2 className="animate-spin mr-2" /> Loading...</span> : "Fetch Preview"}</button>
               </div>
               <div className="border-2 border-gray-300 rounded-lg bg-gray-100 mb-6"><div className="w-full h-96 bg-white"><iframe srcDoc={previewHtml || "<p class='p-4 text-gray-500'>Click 'Fetch Preview'</p>"} title="Live Page Preview" className="w-full h-full" sandbox="allow-scripts allow-same-origin" /></div></div>
               
+              {/* --- NEW: The confirmation dialog UI --- */}
               {selectionSuggestion && (
                   <div className="absolute bottom-24 left-1/2 -translate-x-1/2 w-full max-w-lg bg-white p-4 rounded-lg shadow-2xl border-2 border-blue-500 animate-fade-in-up">
                       <p className="text-center font-semibold text-gray-800">Smart Selection</p>
@@ -167,6 +178,9 @@ const Step3_FieldsAndPrompts = ({
     wooPrompt, setWooPrompt,
     wpPrompt, setWpPrompt
 }) => {
+    // --- NEW LOGGING ---
+    console.log("Step 3: Component rendered. Received model URL for preview ->", selectedModelUrl);
+
     const [previewHtml, setPreviewHtml] = useState("");
     const [isLoading, setIsLoading] = useState(false);
     const [previewJobId, setPreviewJobId] = useState(null);
@@ -176,6 +190,8 @@ const Step3_FieldsAndPrompts = ({
     useEffect(() => {
         const fetchPreview = async () => {
             if (!selectedModelUrl) return;
+            // --- NEW LOGGING ---
+            console.log("Step 3: Fetching preview for model URL ->", selectedModelUrl);
             setIsLoading(true); setPreviewHtml(""); stopPolling();
             try {
                 const response = await apiClient.post("/api/request-page-preview/", { url: selectedModelUrl, project_type: projectType });
@@ -303,15 +319,22 @@ const ScraperWizardView = ({ onProjectSaved, projectToEdit }) => {
       setProjectName(projectToEdit.project_name);
       setProjectType(projectToEdit.project_type);
       const config = projectToEdit.scrape_config;
-
+      const promptTemplate = projectToEdit.llm_prompt_template || '';
+      
       if (projectToEdit.project_type === 'phone_spec_scraper') {
         try {
-          const prompts = JSON.parse(projectToEdit.llm_prompt_template);
+          const prompts = JSON.parse(promptTemplate);
           setWooPrompt(prompts.product_prompt || '');
           setWpPrompt(prompts.price_prompt || '');
-        } catch (e) { console.error("Could not parse prompts:", e); }
+        } catch (e) { console.error("Could not parse phone scraper prompts:", e); setWooPrompt(''); setWpPrompt(''); }
+        setLlmPrompt(promptTemplate);
       } else {
-        setLlmPrompt(projectToEdit.llm_prompt_template);
+        setLlmPrompt(promptTemplate);
+        try {
+            const prompts = JSON.parse(promptTemplate);
+            setWooPrompt(prompts.product_prompt || '');
+            setWpPrompt(prompts.price_prompt || '');
+        } catch (e) { setWooPrompt(''); setWpPrompt(''); }
       }
       setUrlInput(config.initial_urls.join('\n'));
       setElementRules(config.element_rules.map(rule => ({ ...rule, value: '' })));
@@ -357,6 +380,8 @@ const ScraperWizardView = ({ onProjectSaved, projectToEdit }) => {
       scrape_config: scrapeConfig,
       llm_prompt_template: promptTemplate,
     };
+    
+    console.log("Submitting the following project data to the backend:", projectData);
 
     try {
       await apiClient.post("/api/projects", projectData);
@@ -380,8 +405,14 @@ const ScraperWizardView = ({ onProjectSaved, projectToEdit }) => {
                 />;
       case 2:
         return <Step2_LinkSelection 
-                    urlInput={urlInput} setUrlInput={setUrlInput}
-                    onNext={() => setCurrentStep(3)} 
+                    urlInput={urlInput}
+                    onNext={(capturedUrls) => {
+                        // --- NEW LOGGING ---
+                        console.log("Parent (Wizard): Received URLs from Step 2 ->", capturedUrls);
+                        setUrlInput(capturedUrls.join('\n'));
+                        console.log("Parent (Wizard): Switching to Step 3.");
+                        setCurrentStep(3);
+                    }} 
                     onBack={() => setCurrentStep(1)} 
                     projectType={projectType}
                 />;
