@@ -17,9 +17,11 @@ services:
         condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/docs"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      interval: 15s      # Check every 15 seconds
+      timeout: 5s        # Wait 5 seconds for a response
+      retries: 5         # Try 5 times before failing
+      start_period: 30s  # <-- THE FIX: Wait 30 seconds before the first check
+
 
   frontend:
     build: ./frontend

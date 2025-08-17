@@ -1,11 +1,12 @@
 import React from 'react';
-import { LayoutDashboard, Globe, CheckSquare, Settings } from 'lucide-react';
+import { LayoutDashboard, Globe, CheckSquare, Settings, Twitter } from 'lucide-react'; // <-- 1. Imported Twitter icon
 
 const Sidebar = ({ onMenuItemClick, activeItem }) => {
   // Updated menu items to reflect the new workflow
   const menuItems = [
     { name: 'Dashboard', icon: LayoutDashboard },
     { name: 'Scrape Content', icon: Globe },
+    { name: 'Twitter Scraper', icon: Twitter }, // <-- 2. Added new "Twitter Scraper" item
     { name: 'Approval Queue', icon: CheckSquare },
     { name: 'Settings', icon: Settings },
   ];

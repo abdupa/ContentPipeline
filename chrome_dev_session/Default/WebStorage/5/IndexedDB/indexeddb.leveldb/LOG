@@ -1,0 +1,7 @@
+2025/08/17-09:40:07.059 957f8 Reusing MANIFEST /home/abe/ContentPipeline/chrome_dev_session/Default/WebStorage/5/IndexedDB/indexeddb.leveldb/MANIFEST-000001
+2025/08/17-09:40:07.059 957f8 Recovering log #3
+2025/08/17-09:40:07.060 957f8 Reusing old log /home/abe/ContentPipeline/chrome_dev_session/Default/WebStorage/5/IndexedDB/indexeddb.leveldb/000003.log 
+2025/08/17-09:52:50.838 957f7 Level-0 table #5: started
+2025/08/17-09:52:50.841 957f7 Level-0 table #5: 46593 bytes OK
+2025/08/17-09:52:50.845 957f7 Delete type=0 #3
+2025/08/17-09:52:50.846 957f7 Manual compaction at level-0 from (begin) .. (end); will stop at (end)
