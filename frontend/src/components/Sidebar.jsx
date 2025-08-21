@@ -15,7 +15,7 @@ import { LayoutDashboard, Globe, CheckSquare, Settings, BookOpen, History, Send 
 const Sidebar = ({ onMenuItemClick, activeItem }) => {
   const menuItems = [
     { name: 'Dashboard', icon: LayoutDashboard },
-    { name: 'Scrape Content', icon: Globe },
+    { name: 'Scraping Projects', icon: Globe }, // <-- RENAMED
     { name: 'Content Library', icon: BookOpen },
     { name: 'Approval Queue', icon: CheckSquare },
     { name: 'Published Posts', icon: Send }, // <-- NEW

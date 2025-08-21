@@ -95,6 +95,9 @@ class Draft(BaseModel):
     image_title: str
     post_content_html: str
 
+class RegeneratePayload(BaseModel):
+    edited_prompt: str
+
 # --- WordPress Helper Functions ---
 def publish_to_woocommerce(draft_data: dict, wp_url: str, auth_tuple: tuple, media_id: int):
     log_terminal(f"📦 Publishing draft {draft_data['draft_id']} to WooCommerce...")
@@ -169,12 +172,20 @@ async def update_draft(draft_id: str, draft_data: Draft):
     return draft_data
 
 @app.post("/api/drafts/{draft_id}/regenerate", status_code=202)
-async def regenerate_draft(draft_id: str):
+async def regenerate_draft(draft_id: str, payload: RegeneratePayload):
     if not redis_client.exists(f"draft:{draft_id}"):
         raise HTTPException(status_code=404, detail="Draft not found.")
-    regenerate_content_task.delay(draft_id)
-    log_terminal(f"🔄 Queued regeneration task for draft ID: {draft_id}")
-    return {"message": "Content regeneration has been queued."}
+    
+    # Create a job_id for status tracking
+    job_id = f"regen_content_{uuid.uuid4().hex[:10]}"
+    job_status = { "job_id": job_id, "status": "starting" }
+    redis_client.set(f"job:{job_id}", json.dumps(job_status), ex=3600)
+
+    # Pass the job_id and the new edited_prompt to the Celery task
+    regenerate_content_task.delay(job_id, draft_id, payload.edited_prompt)
+    
+    log_terminal(f"🔄 Queued content regeneration for draft ID: {draft_id}. Job ID: {job_id}")
+    return {"job_id": job_id}
 
 @app.post("/api/drafts/{draft_id}/regenerate-image", status_code=202)
 async def regenerate_draft_image(draft_id: str):
@@ -513,3 +524,46 @@ async def get_published_posts():
     except Exception as e:
         log_terminal(f"❌ ERROR in /api/published-posts: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve published posts.")
+    
+@app.delete("/api/projects/{project_id}", status_code=204)
+async def delete_project(project_id: str):
+    """
+    Deletes a specific project configuration and logs the action atomically.
+    """
+    log_terminal(f"--- HIT: DELETE /api/projects/{project_id} ---")
+    project_key = f"project:{project_id}"
+
+    try:
+        project_data_json = redis_client.get(project_key)
+        if not project_data_json:
+            raise HTTPException(status_code=404, detail="Project not found.")
+        
+        project_data = json.loads(project_data_json)
+        project_name = project_data.get("project_name", "Unknown Project")
+
+        # --- THE FIX: Create the log entry BEFORE the pipeline ---
+        log_entry = {
+            "action": "PROJECT_DELETED",
+            "details": {"project_id": project_id, "name": project_name},
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+        # Use a pipeline for atomic deletion AND logging
+        pipe = redis_client.pipeline()
+        pipe.srem("projects_set", project_id)
+        pipe.delete(project_key)
+        
+        # --- ADD logging commands to the same pipeline ---
+        pipe.lpush("action_history", json.dumps(log_entry))
+        pipe.ltrim("action_history", 0, 999)
+        
+        # Execute all commands in one go
+        pipe.execute()
+        
+        log_terminal(f"🗑️ Project '{project_name}' (ID: {project_id}) was deleted and logged.")
+        
+        return
+
+    except Exception as e:
+        log_terminal(f"❌ ERROR in /api/projects/{project_id}: {e}")
+        raise HTTPException(status_code=500, detail="An unexpected error occurred during project deletion.")

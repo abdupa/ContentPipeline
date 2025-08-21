@@ -536,22 +536,21 @@ def generate_content_from_template_task(self, job_id: str, scraped_data: dict, l
         log_terminal(f"❌ Error during intelligent content generation for {scraped_data['source_url']}: {e}")
 
 @celery_app.task(bind=True)
-def regenerate_content_task(self, draft_id: str):
+def regenerate_content_task(self, job_id: str, draft_id: str, edited_prompt: str):
     log_terminal(f"--- [RE-GENERATOR] Starting regeneration for draft: {draft_id} ---")
+    
+    redis_client.set(f"job:{job_id}", json.dumps({"job_id": job_id, "status": "processing"}))
+
     draft_json = redis_client.get(f"draft:{draft_id}")
     if not draft_json:
         log_terminal(f"❌ Draft {draft_id} not found for regeneration.")
+        redis_client.set(f"job:{job_id}", json.dumps({"job_id": job_id, "status": "failed", "error": "Draft not found."}))
         return
 
     try:
         draft_data = json.loads(draft_json)
-        scraped_data = draft_data.get("original_content", {})
-        llm_prompt_template = draft_data.get("llm_prompt_template", "")
-
-        if not scraped_data or not llm_prompt_template:
-            log_terminal(f"❌ Draft {draft_id} is missing original content or prompt template.")
-            return
-
+        
+        # Save the previous content to history
         history_entry = {
             "post_title": draft_data.get("post_title"),
             "post_content_html": draft_data.get("post_content_html"),
@@ -562,28 +561,17 @@ def regenerate_content_task(self, draft_id: str):
             content_history = []
         content_history.append(history_entry)
         draft_data["content_history"] = content_history
-
-        full_text_content = f"{scraped_data.get('title', '')}\n{scraped_data.get('article_html', '')}"
-        mentioned_products = find_mentioned_products(full_text_content)
-        related_products = find_related_products(mentioned_products, product_database)
-        relevant_cluster = find_relevant_cluster(full_text_content)
-
-        final_prompt = llm_prompt_template
-        final_prompt = final_prompt.replace('{source_article_html}', scraped_data.get('article_html', 'N/A'))
-        product_facts_md = "\n".join([f"- **{p['name']}**: URL: {p['url']}" for p in mentioned_products]) if mentioned_products else "None"
-        final_prompt = final_prompt.replace('{product_facts}', product_facts_md)
-        related_links_md = "\n".join([f"- **{p['name']}**: URL: {p['url']}" for p in related_products]) if related_products else "None"
-        final_prompt = final_prompt.replace('{related_product_links}', related_links_md)
-        cluster_context_md = f"- **Name**: {relevant_cluster['cluster']['name']}\n- **URL**: {relevant_cluster['cluster']['url']}" if relevant_cluster else "None"
-        final_prompt = final_prompt.replace('{seo_cluster_context}', cluster_context_md)
-
+        
+        # --- NEW LOGIC: Use the edited prompt directly ---
+        log_terminal(f"    - Using new user-provided prompt for generation.")
         response = openai_client.chat.completions.create(
             model="gpt-4o",
-            messages=[{"role": "user", "content": final_prompt}],
+            messages=[{"role": "user", "content": edited_prompt}], # Use the edited prompt
             response_format={"type": "json_object"},
         )
         ai_json_response = json.loads(response.choices[0].message.content)
 
+        # Update the draft with the new AI response
         fields_to_update = [
             'focus_keyphrase', 'seo_title', 'meta_description', 'slug', 
             'post_category', 'post_tags', 'post_title', 'post_excerpt', 
@@ -593,18 +581,21 @@ def regenerate_content_task(self, draft_id: str):
             if field in ai_json_response:
                 draft_data[field] = ai_json_response[field]
         
+        # Also, save the prompt that was used for this regeneration
+        draft_data["llm_prompt_template"] = edited_prompt
         draft_data["generated_at"] = datetime.now(timezone.utc).isoformat()
         
-        # --- ADD ACTION LOG ---
         log_action("CONTENT_REGENERATED", {"draft_id": draft_id, "title": draft_data.get("post_title")})
-
         redis_client.set(f"draft:{draft_id}", json.dumps(draft_data))
+
+        redis_client.set(f"job:{job_id}", json.dumps({"job_id": job_id, "status": "complete"}))
         log_terminal(f"✅ Successfully regenerated and updated draft: {draft_id}")
 
     except Exception as e:
         log_terminal(f"❌ Error during content regeneration for {draft_id}: {e}")
+        redis_client.set(f"job:{job_id}", json.dumps({"job_id": job_id, "status": "failed", "error": str(e)}))
 
-@celery_app.task(bind=True)
+
 @celery_app.task(bind=True)
 def regenerate_image_task(self, job_id: str, draft_id: str):
     log_terminal(f"--- [IMAGE RE-GEN] Starting for draft: {draft_id} ---")

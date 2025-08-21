@@ -28,7 +28,7 @@ const App = () => {
   const handleMenuItemClick = (itemName) => {
     if (intervalRef.current) clearInterval(intervalRef.current);
     if (itemName === 'Dashboard') setCurrentView('dashboard');
-    else if (itemName === 'Scrape Content') setCurrentView('projects');
+    else if (itemName === 'Scraping Projects') setCurrentView('projects');
     else if (itemName === 'Content Library') setCurrentView('allPosts');
     else if (itemName === 'Approval Queue') setCurrentView('approvalQueue');
     else if (itemName === 'Published Posts') setCurrentView('publishedPosts'); // <-- NEW

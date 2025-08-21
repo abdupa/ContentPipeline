@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { Loader2, Save, RefreshCw, Send, ArrowLeft, Eye, History, Image as ImageIcon, RotateCcw } from 'lucide-react';
+import { Loader2, Save, RefreshCw, Send, ArrowLeft, Eye, History, Image as ImageIcon, RotateCcw, FileText } from 'lucide-react';
 
 const apiClient = axios.create({
   baseURL: `http://${window.location.hostname}:8000`,
@@ -28,6 +28,8 @@ const ContentEditorView = ({ draftId, onBack }) => {
   const [isRegeneratingImage, setIsRegeneratingImage] = useState(false);
   const [error, setError] = useState(null);
   const imagePollInterval = useRef(null);
+  const contentPollInterval = useRef(null);
+
 
   const fetchDraft = async () => {
     if (!draftId) return;
@@ -69,22 +71,41 @@ const ContentEditorView = ({ draftId, onBack }) => {
   };
 
   const handleRegenerate = async () => {
-    if (window.confirm("Are you sure? This will regenerate the AI content, overwriting the current version (which will be saved to history). The image will NOT be regenerated.")) {
+    if (window.confirm("Are you sure? This will regenerate the AI content using the current prompt, overwriting the current version (which will be saved to history).")) {
       setIsRegenerating(true);
       try {
-        await apiClient.post(`/api/drafts/${draft.draft_id}/regenerate`);
-        setTimeout(() => {
-          fetchDraft();
-          setIsRegenerating(false);
-          alert("Regeneration complete! The content has been updated.");
-        }, 5000);
+        const payload = { edited_prompt: draft.llm_prompt_template };
+        const response = await apiClient.post(`/api/drafts/${draft.draft_id}/regenerate`, payload);
+        const { job_id } = response.data;
+
+        contentPollInterval.current = setInterval(async () => {
+          try {
+            const statusResponse = await apiClient.get(`/api/jobs/status/${job_id}`);
+            const { status, error } = statusResponse.data;
+
+            if (status === 'complete') {
+              clearInterval(contentPollInterval.current);
+              setIsRegenerating(false);
+              fetchDraft();
+            } else if (status === 'failed') {
+              clearInterval(contentPollInterval.current);
+              setIsRegenerating(false);
+              alert(`Content regeneration failed: ${error}`);
+            }
+          } catch (pollError) {
+            clearInterval(contentPollInterval.current);
+            setIsRegenerating(false);
+            alert("Error checking content generation status.");
+          }
+        }, 3000);
+
       } catch (err) {
         alert("Failed to start regeneration task.");
         setIsRegenerating(false);
       }
     }
   };
-
+  
   const handleRegenerateImage = async () => {
       setIsRegeneratingImage(true);
       try {
@@ -256,7 +277,20 @@ const ContentEditorView = ({ draftId, onBack }) => {
                 <textarea name="post_content_html" value={draft.post_content_html} onChange={handleInputChange} className="w-full border p-2 rounded h-96 font-mono text-xs border-gray-300"/>
             </div>
         </div>
-
+        <div className="pt-6 border-t">
+          <label htmlFor="llm_prompt_template" className="block text-lg font-semibold text-gray-700 mb-2 flex items-center">
+            <FileText className="w-5 h-5 mr-2 text-gray-500"/>
+            AI Prompt Template (Editable)
+          </label>
+          <textarea 
+            id="llm_prompt_template"
+            name="llm_prompt_template" 
+            value={draft.llm_prompt_template} 
+            onChange={handleInputChange} 
+            rows="12" 
+            className="w-full border p-2 rounded font-mono text-xs border-gray-300 focus:ring-indigo-500 focus:border-indigo-500"
+          />
+        </div>
         <div className="flex items-center gap-4 pt-4 border-t border-gray-200">
           <button onClick={handleSaveDraft} disabled={isSaving || isRegenerating} className="inline-flex items-center bg-green-600 text-white px-4 py-2 rounded-md font-semibold hover:bg-green-700 disabled:bg-gray-400">
             {isSaving ? <Loader2 className="w-5 h-5 mr-2 animate-spin"/> : <Save className="w-5 h-5 mr-2"/>} Save Draft

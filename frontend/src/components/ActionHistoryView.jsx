@@ -68,6 +68,8 @@ const ActionHistoryView = () => {
         return <>You updated project {formattedTitle}</>;
       case 'PROJECT_RUN_STARTED':
         return <>You started a run for project {formattedTitle}</>;
+      case 'PROJECT_DELETED':
+        return <>You deleted project {formattedTitle}</>;
       case 'DRAFT_CREATED':
         return <>A new draft {formattedTitle} was created</>;
       case 'DRAFT_EDITED':

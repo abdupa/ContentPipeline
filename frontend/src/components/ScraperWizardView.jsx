@@ -436,7 +436,9 @@ const ScraperWizardView = ({ onProjectSaved, projectToEdit }) => {
   return (
     <div className="w-full max-w-6xl">
       <div className="mb-6">
-        <h2 className="text-2xl font-bold text-gray-800 mb-2">{projectToEdit ? 'Edit Project' : 'Create New Project'}</h2>
+        <h2 className="text-2xl font-bold text-gray-800 mb-2">
+          {projectToEdit ? `Edit Project: "${projectToEdit.project_name}"` : 'Create New Project'}
+        </h2>
         <div className="flex justify-between items-center text-sm font-semibold text-gray-500">
           <span className={currentStep >= 1 ? 'text-indigo-600' : ''}>Step 1: Details</span>
           <span className={currentStep >= 2 ? 'text-indigo-600' : ''}>Step 2: URLs</span>

@@ -75,6 +75,7 @@ const ProjectsView = ({ onCreateNew, onRunProject, onEditProject }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [projectToRun, setProjectToRun] = useState(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [deletingId, setDeletingId] = useState(null);
 
   const fetchProjects = async () => {
     try {
@@ -93,6 +94,23 @@ const ProjectsView = ({ onCreateNew, onRunProject, onEditProject }) => {
   useEffect(() => {
     fetchProjects();
   }, []);
+
+  // --- NEW: Delete handler function ---
+  const handleDeleteProject = async (projectId, projectName) => {
+    if (window.confirm(`Are you sure you want to delete the project "${projectName}"? This action cannot be undone.`)) {
+        setDeletingId(projectId);
+        try {
+            await apiClient.delete(`/api/projects/${projectId}`);
+            // Refresh the project list on success
+            fetchProjects();
+        } catch (err) {
+            alert(`Failed to delete project: ${err.response?.data?.detail || 'Unknown error'}`);
+            console.error(err);
+        } finally {
+            setDeletingId(null);
+        }
+    }
+  };
 
   const handleRunClick = (project) => {
     // If it's a phone scraper, run immediately.
@@ -215,7 +233,21 @@ const ProjectsView = ({ onCreateNew, onRunProject, onEditProject }) => {
                 </button>
                 <div className="flex items-center space-x-2">
                   <button onClick={() => onEditProject(project)} className="p-2 text-gray-500 hover:text-indigo-600 hover:bg-gray-100 rounded-full"><Edit className="w-4 h-4" /></button>
-                  <button className="p-2 text-gray-500 hover:text-red-600 hover:bg-gray-100 rounded-full"><Trash2 className="w-4 h-4" /></button>
+                  
+                  {/* --- MODIFIED DELETE BUTTON --- */}
+                  <button 
+                    onClick={() => handleDeleteProject(project.project_id, project.project_name)}
+                    disabled={deletingId === project.project_id}
+                    className="p-2 text-gray-500 hover:text-red-600 hover:bg-gray-100 rounded-full disabled:cursor-not-allowed"
+                  >
+                    {deletingId === project.project_id ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                        <Trash2 className="w-4 h-4" />
+                    )}
+                  </button>
+                  {/* --- END MODIFICATION --- */}
+
                 </div>
               </div>
             </div>
