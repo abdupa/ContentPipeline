@@ -1,24 +1,14 @@
 import React from 'react';
-import { LayoutDashboard, Globe, CheckSquare, Settings, BookOpen, History, Send } from 'lucide-react';
-
-// const Sidebar = ({ onMenuItemClick, activeItem }) => {
-//   // --- UPDATED MENU ITEMS ---
-//   const menuItems = [
-//     { name: 'Dashboard', icon: LayoutDashboard },
-//     { name: 'Scrape Content', icon: Globe },
-//     { name: 'Content Library', icon: BookOpen },
-//     { name: 'Approval Queue', icon: CheckSquare },
-//     { name: 'Action History', icon: History },
-//     { name: 'Settings', icon: Settings },
-//   ];
+import { LayoutDashboard, Globe, CheckSquare, Settings, BookOpen, History, Send, Edit3 } from 'lucide-react';
 
 const Sidebar = ({ onMenuItemClick, activeItem }) => {
   const menuItems = [
     { name: 'Dashboard', icon: LayoutDashboard },
-    { name: 'Scraping Projects', icon: Globe }, // <-- RENAMED
+    { name: 'Scraping Projects', icon: Globe },
+    { name: 'Manual Editor', icon: Edit3 },
     { name: 'Content Library', icon: BookOpen },
     { name: 'Approval Queue', icon: CheckSquare },
-    { name: 'Published Posts', icon: Send }, // <-- NEW
+    { name: 'Published Posts', icon: Send },
     { name: 'Action History', icon: History },
     { name: 'Settings', icon: Settings },
   ];

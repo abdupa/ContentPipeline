@@ -650,3 +650,92 @@ def regenerate_image_task(self, job_id: str, draft_id: str):
     except Exception as e:
         log_terminal(f"❌ Error during image regeneration for {draft_id}: {e}")
         redis_client.set(f"job:{job_id}", json.dumps({"job_id": job_id, "status": "failed", "error": str(e)}))
+
+@celery_app.task(bind=True)
+def create_manual_draft_task(self, job_id: str, payload: dict):
+    log_terminal(f"--- [MANUAL GENERATOR] Starting job {job_id} ---")
+    redis_client.set(f"job:{job_id}", json.dumps({"job_id": job_id, "status": "processing"}))
+
+    try:
+        topic = payload.get("topic")
+        keywords = payload.get("keywords")
+        notes = payload.get("notes")
+        
+        # --- NEW: A robust, detailed prompt template for manual creation ---
+        # This prompt is based on our successful scraper prompt.
+        manual_prompt_template = f"""
+You are an expert tech journalist and SEO specialist for GadgetPH.com. Your task is to write a high-quality, original blog post based on the provided topic, keywords, and notes.
+Your final output must be a single, valid JSON object containing all of the following fields.
+
+### Source Material:
+- Topic: {topic}
+- Keywords: {keywords}
+- Notes:
+{notes}
+
+### Your Task:
+Generate the following fields for the new blog post.
+
+- "focus_keyphrase": The primary keyword for the post, based on the source material.
+- "seo_title": A compelling, 60-character SEO title about the topic.
+- "meta_description": A 160-character meta description about the topic.
+- "post_excerpt": A compelling, 2-3 sentence summary of the article.
+- "slug": A URL-friendly slug based on the topic.
+- "post_category": The most relevant category for this topic (e.g., "News", "Reviews", "Guides").
+- "post_tags": A JSON array of 3-5 relevant tags.
+- "post_title": A new, engaging title for the blog post based on the topic.
+- "featured_image_prompt": A prompt for an AI image generator (like DALL-E 3) to create a dynamic, photorealistic image related to the topic.
+- "image_alt_text": SEO-optimized alt text for the featured image.
+- "image_title": A descriptive title for the featured image file.
+- "post_content_html": The full content of the blog post, formatted in HTML for a WordPress editor. It must be at least 400 words.
+"""
+        
+        log_terminal(f"    - Generating content for topic: '{topic}'")
+        response = openai_client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": manual_prompt_template}],
+            response_format={"type": "json_object"},
+        )
+        ai_json_response = json.loads(response.choices[0].message.content)
+
+        # Generate the featured image
+        image_b64 = None
+        try:
+            log_terminal(f"🎨 Generating initial featured image...")
+            image_prompt = ai_json_response.get("featured_image_prompt", topic)
+            image_response = openai_client.images.generate(
+                model="dall-e-3", prompt=image_prompt,
+                n=1, size="1024x1024", response_format="b64_json"
+            )
+            image_b64 = image_response.data[0].b64_json
+            log_terminal("✅ Initial image generated.")
+        except Exception as img_e:
+            log_terminal(f"⚠️  Could not generate initial image: {img_e}")
+
+        # Create the draft object
+        draft_id = f"draft_{uuid.uuid4().hex[:10]}"
+        draft_data = {
+            "draft_id": draft_id, "status": "draft", "source_url": "manual",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "original_content": payload,
+            "llm_prompt_template": payload.get("prompt"), # Save the original simple prompt for reference
+            "content_history": [], "image_history": [],
+            "wordpress_post_id": None, "featured_image_b64": image_b64,
+            **ai_json_response # The AI response should contain all other required fields
+        }
+        redis_client.set(f"draft:{draft_id}", json.dumps(draft_data))
+        redis_client.sadd("drafts_set", draft_id)
+        
+        log_action("DRAFT_CREATED", {"draft_id": draft_id, "title": draft_data.get("post_title")})
+        log_terminal(f"✅ Saved new manual content as draft: {draft_id}")
+
+        # Update job status
+        final_job_status = {
+            "job_id": job_id, "status": "complete",
+            "results": [{"draft_id": draft_id, "title": draft_data.get("post_title")}]
+        }
+        redis_client.set(f"job:{job_id}", json.dumps(final_job_status))
+
+    except Exception as e:
+        log_terminal(f"❌ Error during manual content generation for job {job_id}: {e}")
+        redis_client.set(f"job:{job_id}", json.dumps({"job_id": job_id, "status": "failed", "error": str(e)}))

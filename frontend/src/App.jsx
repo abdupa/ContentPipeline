@@ -11,12 +11,8 @@ import AllPostsView from './components/AllPostsView.jsx';
 import ActionHistoryView from './components/ActionHistoryView.jsx';
 import { HelpCircle, Bell, ChevronDown } from 'lucide-react';
 import PublishedPostsView from './components/PublishedPostsView.jsx';
+import ManualEditorView from './components/ManualEditorView.jsx';
 
-// --- REMOVED: These lines are now in apiClient.js ---
-// const backendApiUrl = `http://${window.location.hostname}:8000`;
-// const apiClient = axios.create({
-//   baseURL: backendApiUrl,
-// });
 
 const App = () => {
   const [currentView, setCurrentView] = useState('dashboard');
@@ -29,11 +25,17 @@ const App = () => {
     if (intervalRef.current) clearInterval(intervalRef.current);
     if (itemName === 'Dashboard') setCurrentView('dashboard');
     else if (itemName === 'Scraping Projects') setCurrentView('projects');
+    else if (itemName === 'Manual Editor') setCurrentView('manualEditor');
     else if (itemName === 'Content Library') setCurrentView('allPosts');
     else if (itemName === 'Approval Queue') setCurrentView('approvalQueue');
     else if (itemName === 'Published Posts') setCurrentView('publishedPosts'); // <-- NEW
     else if (itemName === 'Action History') setCurrentView('actionHistory');
     else alert(`Navigating to: ${itemName}`);
+  };
+
+  const onManualJobStarted = (jobId) => {
+    setActiveScrapeJobId(jobId);
+    setCurrentView('scrapeJobStatus');
   };
 
   const handleRunProject = async (projectId, options) => {
@@ -70,6 +72,7 @@ const App = () => {
   const getActiveSidebarItem = () => {
     if (['projects', 'scrapeWizard', 'scrapeJobStatus'].includes(currentView)) return 'Scrape Content';
     if (['approvalQueue', 'contentEditor'].includes(currentView)) return 'Approval Queue';
+    if (currentView === 'manualEditor') return 'Manual Editor';
     if (currentView === 'allPosts') return 'Content Library';
     if (currentView === 'publishedPosts') return 'Published Posts'; // <-- NEW
     if (currentView === 'actionHistory') return 'Action History';
@@ -93,6 +96,8 @@ const App = () => {
                 />;
       case 'scrapeJobStatus':
         return <JobStatusView jobId={activeScrapeJobId} onReset={() => setCurrentView('projects')} />;
+      case 'manualEditor': // <-- NEW
+        return <ManualEditorView onJobStarted={onManualJobStarted} />;
       case 'publishedPosts': // <-- NEW
         return <PublishedPostsView onEditDraft={handleEditDraft} />;
       case 'allPosts':

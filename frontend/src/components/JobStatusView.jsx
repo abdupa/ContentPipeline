@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { Loader2, CheckCircle, XCircle, FileDown, Info } from 'lucide-react';
+import { Loader2, CheckCircle, XCircle, FileDown, Info, CheckSquare } from 'lucide-react';
 
 const apiClient = axios.create({
   baseURL: `http://${window.location.hostname}:8000`,
 });
 
-const JobStatusView = ({ jobId, onReset }) => {
+const JobStatusView = ({ jobId, onReset, onNavigateToQueue }) => {
   const [jobData, setJobData] = useState(null);
   const [error, setError] = useState(null);
   const intervalRef = useRef(null);
@@ -146,14 +146,29 @@ const JobStatusView = ({ jobId, onReset }) => {
         <div className="mb-6 p-4 bg-green-50 text-green-700 rounded-lg flex items-center justify-between">
             <div className="flex items-center">
                 <CheckCircle className="mr-3" />
-                <span className="text-lg font-semibold">Job Complete! Processed {jobData.total_urls} articles and generated {jobData.results.length} new drafts.</span>
+                <span className="text-lg font-semibold">
+                  {/* Differentiate between scraper and manual job completion */}
+                  {jobData.results && jobData.results.length === 1 && jobData.results[0].draft_id 
+                    ? `Successfully generated 1 new draft.`
+                    : `Job Complete! Processed ${jobData.total_urls || 0} items and generated ${jobData.results?.length || 0} new drafts.`
+                  }
+                </span>
             </div>
-            {jobData.results && jobData.results.length > 0 && (
-                <button onClick={handleDownloadCsv} className="px-4 py-2 bg-green-600 text-white font-semibold rounded-md hover:bg-green-700 flex items-center gap-2">
-                  <FileDown className="w-5 h-5"/>
-                  Download CSV
-                </button>
-            )}
+
+            {/* --- NEW LOGIC: Show appropriate button based on job result --- */}
+            {jobData.results && jobData.results.length > 0 ? (
+                jobData.results[0].draft_id ? ( // This is a manual job result
+                    <button onClick={onNavigateToQueue} className="px-4 py-2 bg-green-600 text-white font-semibold rounded-md hover:bg-green-700 flex items-center gap-2">
+                        <CheckSquare className="w-5 h-5"/>
+                        View Draft in Approval Queue
+                    </button>
+                ) : ( // This is a scraper job result
+                    <button onClick={handleDownloadCsv} className="px-4 py-2 bg-green-600 text-white font-semibold rounded-md hover:bg-green-700 flex items-center gap-2">
+                        <FileDown className="w-5 h-5"/>
+                        Download CSV
+                    </button>
+                )
+            ) : null}
         </div>
       )}
       

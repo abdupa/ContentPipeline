@@ -30,7 +30,12 @@ app.add_middleware(
 openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # --- Pydantic Models ---
-# --- NEW: Add the missing model for dashboard stats ---
+class ManualDraftPayload(BaseModel):
+    topic: str
+    keywords: str
+    notes: str
+    prompt: str
+
 class DashboardStats(BaseModel):
     total_posts: int
     draft_posts: int
@@ -132,6 +137,27 @@ def get_or_create_term(name: str, term_type: str, base_url: str, auth_tuple: tup
     except requests.RequestException as e:
         log_terminal(f"❌ Could not get or create {term_type[:-1]} '{name}': {e}")
         return None
+
+@app.post("/api/drafts/manual", status_code=202)
+async def create_manual_draft(payload: ManualDraftPayload):
+    """
+    Creates a new draft from manual user input.
+    """
+    log_terminal("--- HIT: POST /api/drafts/manual ---")
+    try:
+        job_id = f"manual_gen_{uuid.uuid4().hex[:10]}"
+        job_status = { "job_id": job_id, "status": "starting" }
+        redis_client.set(f"job:{job_id}", json.dumps(job_status), ex=3600)
+
+        # Import the new task
+        from tasks import create_manual_draft_task
+        create_manual_draft_task.delay(job_id, payload.dict())
+        
+        log_terminal(f"✍️ Queued manual draft generation. Job ID: {job_id}")
+        return {"job_id": job_id}
+    except Exception as e:
+        log_terminal(f"❌ ERROR in /api/drafts/manual: {e}")
+        raise HTTPException(status_code=500, detail="Failed to queue manual draft creation task.")
 
 # --- Data Management Endpoint ---
 @app.post("/api/data/refresh-products", status_code=202)
