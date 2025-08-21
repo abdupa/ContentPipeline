@@ -1,16 +1,30 @@
 import React from 'react';
-import { LayoutDashboard, Globe, CheckSquare, Settings } from 'lucide-react';
+import { LayoutDashboard, Globe, CheckSquare, Settings, BookOpen, History, Send } from 'lucide-react';
+
+// const Sidebar = ({ onMenuItemClick, activeItem }) => {
+//   // --- UPDATED MENU ITEMS ---
+//   const menuItems = [
+//     { name: 'Dashboard', icon: LayoutDashboard },
+//     { name: 'Scrape Content', icon: Globe },
+//     { name: 'Content Library', icon: BookOpen },
+//     { name: 'Approval Queue', icon: CheckSquare },
+//     { name: 'Action History', icon: History },
+//     { name: 'Settings', icon: Settings },
+//   ];
 
 const Sidebar = ({ onMenuItemClick, activeItem }) => {
-  // Updated menu items to reflect the new workflow
   const menuItems = [
     { name: 'Dashboard', icon: LayoutDashboard },
     { name: 'Scrape Content', icon: Globe },
+    { name: 'Content Library', icon: BookOpen },
     { name: 'Approval Queue', icon: CheckSquare },
+    { name: 'Published Posts', icon: Send }, // <-- NEW
+    { name: 'Action History', icon: History },
     { name: 'Settings', icon: Settings },
   ];
 
   return (
+    // ... rest of the component remains the same
     <div className="w-64 bg-gray-800 text-white flex flex-col rounded-r-lg shadow-lg py-6 px-4">
       <div className="mb-8 px-4 flex justify-center">
         <img src="https://placehold.co/150x50/1f2937/a78bfa?text=ContentPipeline" alt="AI ContentGen Logo" className="h-12 w-auto object-contain"/>

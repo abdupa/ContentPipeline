@@ -20,3 +20,6 @@ npm-debug.log
 .env
 .env.*
 !.env.example
+# Browser session data
+backend/browser_profile/
+chrome_dev_session/

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import axios from 'axios';
+import apiClient from './apiClient'; // Correctly imported from our new central file
 import Sidebar from './components/Sidebar.jsx';
 import DashboardView from './components/DashboardView.jsx';
 import ScraperWizardView from './components/ScraperWizardView.jsx';
@@ -7,13 +7,16 @@ import ProjectsView from './components/ProjectsView.jsx';
 import JobStatusView from './components/JobStatusView.jsx';
 import ApprovalQueueView from './components/ApprovalQueueView.jsx';
 import ContentEditorView from './components/ContentEditorView.jsx';
+import AllPostsView from './components/AllPostsView.jsx';
+import ActionHistoryView from './components/ActionHistoryView.jsx';
 import { HelpCircle, Bell, ChevronDown } from 'lucide-react';
+import PublishedPostsView from './components/PublishedPostsView.jsx';
 
-const backendApiUrl = `http://${window.location.hostname}:8000`;
-
-const apiClient = axios.create({
-  baseURL: backendApiUrl,
-});
+// --- REMOVED: These lines are now in apiClient.js ---
+// const backendApiUrl = `http://${window.location.hostname}:8000`;
+// const apiClient = axios.create({
+//   baseURL: backendApiUrl,
+// });
 
 const App = () => {
   const [currentView, setCurrentView] = useState('dashboard');
@@ -26,7 +29,10 @@ const App = () => {
     if (intervalRef.current) clearInterval(intervalRef.current);
     if (itemName === 'Dashboard') setCurrentView('dashboard');
     else if (itemName === 'Scrape Content') setCurrentView('projects');
+    else if (itemName === 'Content Library') setCurrentView('allPosts');
     else if (itemName === 'Approval Queue') setCurrentView('approvalQueue');
+    else if (itemName === 'Published Posts') setCurrentView('publishedPosts'); // <-- NEW
+    else if (itemName === 'Action History') setCurrentView('actionHistory');
     else alert(`Navigating to: ${itemName}`);
   };
 
@@ -36,14 +42,12 @@ const App = () => {
       setActiveScrapeJobId(response.data.job_id);
       setCurrentView('scrapeJobStatus');
     } catch (error) {
-      // *** THE FIX: Improved error message handling ***
       let errorMessage = "An unknown error occurred. Please check the backend logs.";
       if (error.response?.data?.detail) {
           const detail = error.response.data.detail;
           if (typeof detail === 'string') {
               errorMessage = detail;
           } else if (Array.isArray(detail)) {
-              // Format FastAPI validation errors for readability
               errorMessage = detail.map(err => `Error in field '${err.loc[1]}': ${err.msg}`).join('\n');
           } else {
               errorMessage = JSON.stringify(detail);
@@ -66,13 +70,16 @@ const App = () => {
   const getActiveSidebarItem = () => {
     if (['projects', 'scrapeWizard', 'scrapeJobStatus'].includes(currentView)) return 'Scrape Content';
     if (['approvalQueue', 'contentEditor'].includes(currentView)) return 'Approval Queue';
+    if (currentView === 'allPosts') return 'Content Library';
+    if (currentView === 'publishedPosts') return 'Published Posts'; // <-- NEW
+    if (currentView === 'actionHistory') return 'Action History';
     return 'Dashboard';
   };
   
   const renderCurrentView = () => {
     switch (currentView) {
       case 'dashboard':
-        return <DashboardView />;
+        return <DashboardView handleMenuItemClick={handleMenuItemClick} />;
       case 'projects':
         return <ProjectsView 
                   onCreateNew={() => { setProjectToEdit(null); setCurrentView('scrapeWizard'); }} 
@@ -86,8 +93,14 @@ const App = () => {
                 />;
       case 'scrapeJobStatus':
         return <JobStatusView jobId={activeScrapeJobId} onReset={() => setCurrentView('projects')} />;
+      case 'publishedPosts': // <-- NEW
+        return <PublishedPostsView onEditDraft={handleEditDraft} />;
+      case 'allPosts':
+        return <AllPostsView onEditDraft={handleEditDraft} />;
       case 'approvalQueue':
         return <ApprovalQueueView onEditDraft={handleEditDraft} />;
+      case 'actionHistory':
+        return <ActionHistoryView />;
       case 'contentEditor':
         return <ContentEditorView draftId={draftToEditId} onBack={() => setCurrentView('approvalQueue')} />;
       default:

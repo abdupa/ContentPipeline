@@ -10,9 +10,10 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from playwright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
-from shared_state import redis_client, log_terminal
+from shared_state import redis_client, log_terminal, log_action
 from celery.signals import worker_process_init
 from urllib.parse import urljoin
+
 
 from celery_app import app as celery_app
 
@@ -167,12 +168,6 @@ def find_contextual_ctas(html_content: str) -> dict:
     return ctas_by_heading
 
 # --- Celery Tasks ---
-@celery_app.task
-# In backend/tasks.py
-
-@celery_app.task
-# In backend/tasks.py
-
 @celery_app.task
 def generate_preview_task(job_id: str, url: str, project_type: str = 'standard_article'):
     log_terminal(f"--- [PREVIEW WORKER] Starting preview for URL: {url} (Type: {project_type}) ---")
@@ -518,6 +513,9 @@ def generate_content_from_template_task(self, job_id: str, scraped_data: dict, l
         redis_client.set(f"draft:{draft_id}", json.dumps(draft_data))
         redis_client.sadd("drafts_set", draft_id)
         
+        # --- ADD ACTION LOG ---
+        log_action("DRAFT_CREATED", {"draft_id": draft_id, "title": draft_data.get("post_title")})
+        
         redis_client.sadd(PROCESSED_URLS_KEY, scraped_data['source_url'])
         log_terminal(f"✅ Saved new intelligent content as draft: {draft_id}")
         
@@ -597,12 +595,16 @@ def regenerate_content_task(self, draft_id: str):
         
         draft_data["generated_at"] = datetime.now(timezone.utc).isoformat()
         
+        # --- ADD ACTION LOG ---
+        log_action("CONTENT_REGENERATED", {"draft_id": draft_id, "title": draft_data.get("post_title")})
+
         redis_client.set(f"draft:{draft_id}", json.dumps(draft_data))
         log_terminal(f"✅ Successfully regenerated and updated draft: {draft_id}")
 
     except Exception as e:
         log_terminal(f"❌ Error during content regeneration for {draft_id}: {e}")
 
+@celery_app.task(bind=True)
 @celery_app.task(bind=True)
 def regenerate_image_task(self, job_id: str, draft_id: str):
     log_terminal(f"--- [IMAGE RE-GEN] Starting for draft: {draft_id} ---")
@@ -645,6 +647,10 @@ def regenerate_image_task(self, job_id: str, draft_id: str):
 
         draft_data["featured_image_b64"] = image_b64
         draft_data["generated_at"] = datetime.now(timezone.utc).isoformat()
+        
+        # --- ADD ACTION LOG ---
+        log_action("IMAGE_REGENERATED", {"draft_id": draft_id, "title": draft_data.get("post_title")})
+
         redis_client.set(f"draft:{draft_id}", json.dumps(draft_data))
         
         redis_client.set(f"job:{job_id}", json.dumps({"job_id": job_id, "status": "complete"}))

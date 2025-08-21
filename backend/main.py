@@ -30,6 +30,16 @@ app.add_middleware(
 openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # --- Pydantic Models ---
+# --- NEW: Add the missing model for dashboard stats ---
+class DashboardStats(BaseModel):
+    total_posts: int
+    draft_posts: int
+    published_posts: int
+    scheduled_posts: int
+    fsc: str
+    indexed: str
+    not_indexed: str
+
 class RunOptions(BaseModel):
     target_date: Optional[str] = None
     limit: Optional[int] = None
@@ -135,12 +145,13 @@ async def refresh_product_database():
 # --- Approval Queue Endpoints ---
 @app.get("/api/drafts", response_model=List[Draft])
 async def get_all_drafts():
+    # This endpoint is now specifically for the Approval Queue (drafts only)
     draft_ids = redis_client.smembers("drafts_set")
-    published_ids = redis_client.smembers("published_set")
-    all_ids = draft_ids.union(published_ids)
-    if not all_ids: return []
-    # --- BUG FIX: Removed unnecessary .decode() call ---
-    pipelines = redis_client.mget([f"draft:{did}" for did in all_ids])
+    if not draft_ids:
+        return []
+    
+    draft_keys = [f"draft:{did}" for did in draft_ids]
+    pipelines = redis_client.mget(draft_keys)
     posts = [json.loads(p) for p in pipelines if p]
     return posts
 
@@ -372,3 +383,133 @@ async def get_run_status(job_id: str):
         job_json = redis_client.get(job_id)
         if not job_json: raise HTTPException(status_code=404, detail="Job not found.")
     return json.loads(job_json)
+
+# new endpoints
+@app.get("/api/dashboard/stats", response_model=DashboardStats)
+async def get_dashboard_stats():
+    """
+    Provides aggregated statistics for the main dashboard.
+    """
+    log_terminal("--- HIT: GET /api/dashboard/stats ---") # <-- NEW LOG
+    try:
+        draft_count = redis_client.scard("drafts_set")
+        published_count = redis_client.scard("published_set")
+        
+        stats = {
+            "draft_posts": draft_count,
+            "published_posts": published_count,
+            "total_posts": draft_count + published_count,
+            "scheduled_posts": 0,
+            "fsc": "N/A",
+            "indexed": "N/A",
+            "not_indexed": "N/A"
+        }
+        return stats
+    except Exception as e:
+        log_terminal(f"❌ ERROR in /api/dashboard/stats: {e}") # <-- Enhanced Error Log
+        raise HTTPException(status_code=500, detail="Failed to retrieve dashboard stats.")
+
+@app.get("/api/posts", response_model=List[Draft])
+async def get_all_posts():
+    """
+    Fetches all posts, both drafts and published, for the Content Library.
+    """
+    log_terminal("--- HIT: GET /api/posts ---") # <-- NEW LOG
+    try:
+        draft_ids = redis_client.smembers("drafts_set")
+        published_ids = redis_client.smembers("published_set")
+        all_ids = draft_ids.union(published_ids)
+        if not all_ids:
+            return []
+        
+        post_keys = [f"draft:{pid}" for pid in all_ids]
+        posts_json = redis_client.mget(post_keys)
+        
+        all_posts = [json.loads(p) for p in posts_json if p]
+        return all_posts
+    except Exception as e:
+        log_terminal(f"❌ ERROR in /api/posts: {e}") # <-- Enhanced Error Log
+        raise HTTPException(status_code=500, detail="Failed to retrieve posts.")
+
+@app.delete("/api/posts/{post_id}", status_code=204)
+async def delete_post(post_id: str):
+    """
+    Deletes a specific post and logs the action in a single atomic transaction.
+    """
+    log_terminal(f"--- HIT: DELETE /api/posts/{post_id} ---")
+    post_key = f"draft:{post_id}"
+
+    try:
+        # 1. Verify the post exists before doing anything
+        post_data_json = redis_client.get(post_key)
+        if not post_data_json:
+            log_terminal(f"⚠️  Delete failed: Post with ID {post_id} not found.")
+            raise HTTPException(status_code=404, detail="Post not found.")
+        
+        post_data = json.loads(post_data_json)
+        post_title = post_data.get("post_title", "Unknown Title")
+        log_terminal(f"Found post '{post_title}'. Preparing to delete.")
+
+        # 2. Create the log entry BEFORE the pipeline
+        log_entry = {
+            "action": "POST_DELETED",
+            "details": {"post_id": post_id, "title": post_title},
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+        # 3. Use a pipeline to perform all deletions AND logging atomically
+        pipe = redis_client.pipeline()
+        
+        # --- Deletion commands ---
+        pipe.srem("drafts_set", post_id)
+        pipe.srem("published_set", post_id)
+        pipe.delete(post_key)
+        
+        # --- Logging commands ---
+        pipe.lpush("action_history", json.dumps(log_entry))
+        pipe.ltrim("action_history", 0, 999)
+        
+        # 4. Execute all commands in one go
+        pipe.execute()
+        
+        log_terminal(f"🗑️ Post '{post_title}' (ID: {post_id}) was successfully deleted and logged.")
+        
+        return
+
+    except Exception as e:
+        log_terminal(f"❌ UNEXPECTED ERROR in /api/posts/{post_id}: {e}")
+        raise HTTPException(status_code=500, detail="An unexpected error occurred during post deletion.")
+
+@app.get("/api/account/history")
+async def get_action_history():
+    """
+    Retrieves the last 100 actions from the history log.
+    """
+    log_terminal("--- HIT: GET /api/account/history ---") # <-- NEW LOG
+    try:
+        history_json = redis_client.lrange("action_history", 0, 99)
+        history = [json.loads(item) for item in history_json]
+        return history
+    except Exception as e:
+        log_terminal(f"❌ ERROR in /api/account/history: {e}") # <-- Enhanced Error Log
+        raise HTTPException(status_code=500, detail="Failed to retrieve action history.")
+    
+@app.get("/api/published-posts", response_model=List[Draft])
+async def get_published_posts():
+    """
+    Fetches only published posts.
+    """
+    log_terminal("--- HIT: GET /api/published-posts ---")
+    try:
+        published_ids = redis_client.smembers("published_set")
+        if not published_ids:
+            return []
+        
+        post_keys = [f"draft:{pid}" for pid in published_ids]
+        posts_json = redis_client.mget(post_keys)
+        
+        published_posts = [json.loads(p) for p in posts_json if p]
+        return published_posts
+    except Exception as e:
+        log_terminal(f"❌ ERROR in /api/published-posts: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve published posts.")
