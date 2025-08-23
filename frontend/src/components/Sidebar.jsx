@@ -1,9 +1,12 @@
 import React from 'react';
-import { LayoutDashboard, Globe, CheckSquare, Settings, BookOpen, History, Send, Edit3 } from 'lucide-react';
+import { LayoutDashboard, Globe, CheckSquare, Settings, BookOpen, History, Send, Edit3, BarChart2, TrendingUp } from 'lucide-react';
+import logo from '../assets/cpl-logo4.png';
 
 const Sidebar = ({ onMenuItemClick, activeItem }) => {
   const menuItems = [
     { name: 'Dashboard', icon: LayoutDashboard },
+    { name: 'Insights', icon: TrendingUp },
+    { name: 'Performance', icon: BarChart2 },
     { name: 'Scraping Projects', icon: Globe },
     { name: 'Manual Editor', icon: Edit3 },
     { name: 'Content Library', icon: BookOpen },
@@ -17,7 +20,7 @@ const Sidebar = ({ onMenuItemClick, activeItem }) => {
     // ... rest of the component remains the same
     <div className="w-64 bg-gray-800 text-white flex flex-col rounded-r-lg shadow-lg py-6 px-4">
       <div className="mb-8 px-4 flex justify-center">
-        <img src="https://placehold.co/150x50/1f2937/a78bfa?text=ContentPipeline" alt="AI ContentGen Logo" className="h-12 w-auto object-contain"/>
+        <img src={logo} alt="ContentPipeline Logo" className="h-30 w-auto object-contain"/>
       </div>
       <nav className="flex-1">
         <ul>

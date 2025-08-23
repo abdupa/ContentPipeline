@@ -9316,7 +9316,7 @@
       "Display Size": "6.9 inches, 115.6 cm",
       "Display Resolution": "1320 x 2868 pixels, 19.5:9 ratio (~460 ppi density)",
       "Internal Memory": "256GB 8GB RAM, 512GB 8GB RAM, 1TB 8GB RAM NVMe",
-      "Main Camera": "12 MP, f/2.8, 120mm (periscope telephoto), 1/3.06\", 1.12µm, dual pixel PDAF, 3D sensor‑shift OIS, 5x optical zoom, 48 MP, f/2.2, 13mm (ultrawide), 1/2.55\", 0.7µm, PDAF TOF 3D LiDAR scanner (depth), 48 MP, f/1.8, 24mm (wide), 1/1.28\", 1.22µm, dual pixel PDAF, sensor-shift OIS",
+      "Main Camera": "12 MP, f/2.8, 120mm (periscope telephoto), 1/3.06\", 1.12µm, dual pixel PDAF, 3D sensor‑shift OIS, 5x optical zoom, 48 MP, f/1.8, 24mm (wide), 1/1.28\", 1.22µm, dual pixel PDAF, sensor-shift OIS, 48 MP, f/2.2, 13mm (ultrawide), 1/2.55\", 0.7µm, PDAF TOF 3D LiDAR scanner (depth)",
       "Selfie Camera": "12 MP, f/1.9, 23mm (wide), 1/3.6\", 1.0µm, PDAF, OIS SL 3D, (depth/biometrics sensor)",
       "Battery Type": "Li-Ion 4685 mAh",
       "Battery Charging": "Wired, PD2.0, 50% in 30 min"
@@ -27682,7 +27682,7 @@
       "Display Size": "6.74 inches, 109.2 cm2 (~87.9% screen-to-body ratio)",
       "Display Resolution": "1240 x 2772 pixels, 20:9 ratio (~451 ppi density)",
       "Internal Memory": "1TB 16GB RAM, 256GB 16GB RAM, 512GB 16GB RAM",
-      "Main Camera": "f/3.3, f/2.2, PDAF, OIS 8 MP, f/1.9, 1/1.56\", 1.0Âµm, 1/4.0\", 1.12Âµm 2 MP, 16mm, 20mm (microscope), 24mm (wide), 50 MP, 112Ëš (ultrawide)",
+      "Main Camera": "f/1.9, f/3.3, f/2.2, PDAF, OIS 8 MP, 1/4.0\", 1/1.56\", 1.0Âµm, 1.12Âµm 2 MP, 16mm, 20mm (microscope), 24mm (wide), 50 MP, 112Ëš (ultrawide)",
       "Selfie Camera": "1.0Âµm, 1/3.09\", 16 MP, 25mm (wide), f/2.5",
       "Battery Type": "Li-Po 4600 mAh, non-removable",
       "Battery Charging": "1-100% in 10 min (advertised), 1-50% in 4 min, 240W wired"
@@ -38956,7 +38956,7 @@
       "Display Size": "107.4 cm2 (~86.0% screen-to-body ratio), 6.67 inches",
       "Display Resolution": "1080 x 2400 pixels, 20:9 ratio (~395 ppi density)",
       "Internal Memory": "128GB 6GB RAM, 128GB 8GB RAM, 256GB 8GB RAM",
-      "Main Camera": "PDAF 8 MP, f/2.4, f/1.9, 0.7Âµm, 1/1.52\", 26mm (wide), 50mm (telephoto macro), 108 MP, 120Ëš (ultrawide) 2 MP",
+      "Main Camera": "f/1.9, PDAF 8 MP, f/2.4, 0.7Âµm, 1/1.52\", 26mm (wide), 50mm (telephoto macro), 108 MP, 120Ëš (ultrawide) 2 MP",
       "Selfie Camera": "16 MP",
       "Battery Type": "Li-Po 4500 mAh, non-removable",
       "Battery Charging": "100% in 15 min (advertised) Power Delivery 3.0 Quick Charge 3+, Fast charging 120W"
@@ -38973,7 +38973,7 @@
       "Display Size": "103.6 cm2 (~85.3% screen-to-body ratio), 6.55 inches",
       "Display Resolution": "Unspecified",
       "Internal Memory": "128GB 6GB RAM, 128GB 8GB RAM, 256GB 8GB RAM",
-      "Main Camera": "f/1.9, PDAF 8 MP, f/2.2, f/2.4, (macro), 0.7Âµm, 1/1.52\", 1.0Âµm 2 MP, 26mm (wide), 108 MP, 120Ëš (ultrawide)",
+      "Main Camera": "PDAF 8 MP, f/2.2, f/2.4, (macro), f/1.9, 0.7Âµm, 1.0Âµm 2 MP, 1/1.52\", 26mm (wide), 108 MP, 120Ëš (ultrawide)",
       "Selfie Camera": "(wide), 1.0Âµm, 16 MP, f/2.5",
       "Battery Type": "Li-Po 4500 mAh, non-removable",
       "Battery Charging": "100% in 15 min (advertised), Fast charging 120W"
@@ -39026,7 +39026,7 @@
       "Display Size": "4.3 inches, 51.0 cm2 (~63.0% screen-to-body ratio)",
       "Display Resolution": "16:9 ratio (~256 ppi density), 540 x 960 pixels",
       "Internal Memory": "256GB 12GB RAM",
-      "Main Camera": "AF TOF 3D, PDAF, OIS 8 MP, f/1.8, (wide), OIS 16 MP, f/2.2, f/2.4, (depth), 0.8Âµm, 1/1.33\", 1.0Âµm, 3x optical zoom, 13mm (ultrawide), 81mm (telephoto), 108 MP",
+      "Main Camera": "OIS 8 MP, f/1.8, (wide), OIS 16 MP, f/2.2, f/2.4, (depth), AF TOF 3D, PDAF, 0.8Âµm, 1/1.33\", 1.0Âµm, 3x optical zoom, 13mm (ultrawide), 81mm (telephoto), 108 MP",
       "Selfie Camera": "(wide), 0.9Âµm, 25 MP, f/2.0",
       "Battery Type": "Li-Po 5000 mAh, non-removable",
       "Battery Charging": "Fast charging 18W Fast wireless charging 15W Reverse wireless charging 5W"
@@ -41899,7 +41899,7 @@
       "Display Size": "102.0 cm2 (~81.7% screen-to-body ratio), 6.5 inches",
       "Display Resolution": "20:9 ratio (~270 ppi density), 720 x 1600 pixels",
       "Internal Memory": "128GB 4GB RAM",
-      "Main Camera": "2 MP, (macro), 2 MP, (depth), 13 MP",
+      "Main Camera": "2 MP, (depth), 2 MP, (macro), 13 MP",
       "Selfie Camera": "8 MP",
       "Battery Type": "Li-Po 5000 mAh, non-removable",
       "Battery Charging": "-"
@@ -46034,7 +46034,7 @@
       "Display Size": "6.5 inches, 102.0 cm2 (~83.3% screen-to-body ratio)",
       "Display Resolution": "1080 x 2400 pixels, 20:9 ratio (~405 ppi density)",
       "Internal Memory": "128GB 6GB RAM, 64GB 4GB RAM",
-      "Main Camera": "2 MP, f/2.4 (depth), 2 MP, f/2.4, (macro), 8 MP, f/2.2, 120Ã‹Âš (ultrawide), 50 MP, f/1.8, (wide), PDAF",
+      "Main Camera": "2 MP, f/2.4, (macro), 2 MP, f/2.4 (depth), 8 MP, f/2.2, 120Ã‹Âš (ultrawide), 50 MP, f/1.8, (wide), PDAF",
       "Selfie Camera": "8 MP, f/2.0, (wide) 1/4.0\", 1.12Ã‚Âµm",
       "Battery Type": "Li-Po 6000 mAh, non-removable",
       "Battery Charging": "18W wired 9W reverse wired"
@@ -46610,7 +46610,7 @@
       "Display Size": "115.7 cm2 (~94.9% screen-to-body ratio), 6.76 inches",
       "Display Resolution": "1344 x 2772 pixels, 18.5:9 ratio (~456 ppi density)",
       "Internal Memory": "256GB 12GB RAM, 256GB 8GB RAM, 512GB 12GB RAM",
-      "Main Camera": "TOF 3D (depth), 13 MP, f/2.2, 120Ã‹Âš (ultrawide), PDAF, 50 MP, f/1.9, 23mm (wide), 1/1.56\", 1.0Ã‚Âµm, multi-directional PDAF, 64 MP, f/3.5, 90mm (telephoto), 1/2.0\", 0.7Ã‚Âµm, PDAF, OIS, 3.5x optical zoom, 64 MP, f/1.8, (monochrome)",
+      "Main Camera": "TOF 3D (depth), 13 MP, f/2.2, 120Ã‹Âš (ultrawide), PDAF, 50 MP, f/1.9, 23mm (wide), 1/1.56\", 1.0Ã‚Âµm, multi-directional PDAF, 64 MP, f/1.8, (monochrome), 64 MP, f/3.5, 90mm (telephoto), 1/2.0\", 0.7Ã‚Âµm, PDAF, OIS, 3.5x optical zoom",
       "Selfie Camera": "13 MP, f/2.4, 100Ã‹Âš (ultrawide), TOF 3D, (depth/biometrics sensor)",
       "Battery Type": "Li-Po 4600 mAh, non-removable",
       "Battery Charging": "66W wired 66W wireless 5W reverse wireless 5W reverse wired"
@@ -55869,7 +55869,7 @@
       "Display Size": "104.6 cm2 (~90.6% screen-to-body ratio), 6.56 inches",
       "Display Resolution": "1080 x 2376 pixels (~398 ppi density)",
       "Internal Memory": "256GB 8GB RAM",
-      "Main Camera": "8 MP, f/2.2, 120Ã‹Âš, 16mm (ultrawide), 1/4.0\", 1.12Ã‚Âµm, 8 MP, f/3.4, 135mm (periscope telephoto), 1/4.0\", PDAF, OIS, 5x optical zoom, 13 MP, f/2.5, 50mm (telephoto), 1/2.8\", 0.8Ã‚Âµm, PDAF, 2x optical zoom, 48 MP, f/1.6, (wide), PDAF, Laser AF, gimbal OIS",
+      "Main Camera": "8 MP, f/3.4, 135mm (periscope telephoto), 1/4.0\", PDAF, OIS, 5x optical zoom, 8 MP, f/2.2, 120Ã‹Âš, 16mm (ultrawide), 1/4.0\", 1.12Ã‚Âµm, 13 MP, f/2.5, 50mm (telephoto), 1/2.8\", 0.8Ã‚Âµm, PDAF, 2x optical zoom, 48 MP, f/1.6, (wide), PDAF, Laser AF, gimbal OIS",
       "Selfie Camera": "32 MP, f/2.5, 26mm (wide), 1/2.8\", 0.8Ã‚Âµm",
       "Battery Type": "Li-Po 4315 mAh, non-removable",
       "Battery Charging": "57% in 30 min (advertised), 33W wired"
@@ -58999,7 +58999,7 @@
       "Display Size": "6.4 inches, 98.9 cm2 (~83.0% screen-to-body ratio)",
       "Display Resolution": "1080 x 2400 pixels, 20:9 ratio (~411 ppi density)",
       "Internal Memory": "128GB 8GB RAM, 256GB 8GB RAM",
-      "Main Camera": "2 MP B/W, f/2.4, 1/5.0\", 1.75Âµm, 2 MP, f/2.4, (depth), 8 MP, f/2.2, 13mm (ultrawide), 1/4.0\", 1.12Âµm, 48 MP, f/1.7, 26mm (wide), 1/2.0\", 0.8Âµm, PDAF",
+      "Main Camera": "2 MP, f/2.4, (depth), 2 MP B/W, f/2.4, 1/5.0\", 1.75Âµm, 8 MP, f/2.2, 13mm (ultrawide), 1/4.0\", 1.12Âµm, 48 MP, f/1.7, 26mm (wide), 1/2.0\", 0.8Âµm, PDAF",
       "Selfie Camera": "32 MP, f/2.0, 26mm (wide), 1/2.8\", 0.8Âµm",
       "Battery Type": "Li-Po 4025 mAh, non-removable",
       "Battery Charging": "50% in 20 min (advertised), 30W wired"
@@ -59485,7 +59485,7 @@
       "Display Size": "102.0 cm2 (~84.1% screen-to-body ratio), 6.5 inches",
       "Display Resolution": "1080 x 2400 pixels, 20:9 ratio (~405 ppi density)",
       "Internal Memory": "64GB 4GB RAM, 64GB 6GB RAM",
-      "Main Camera": "2 MP B/W, f/2.4, (depth), 2 MP, f/2.4, (macro), 8 MP, f/2.3, 119Ëš (ultrawide), 1/4.0\", 1.12Âµm, 48 MP, f/1.8, 26mm (wide), 1/2.0\", 0.8Âµm, PDAF",
+      "Main Camera": "2 MP, f/2.4, (macro), 2 MP B/W, f/2.4, (depth), 8 MP, f/2.3, 119Ëš (ultrawide), 1/4.0\", 1.12Âµm, 48 MP, f/1.8, 26mm (wide), 1/2.0\", 0.8Âµm, PDAF",
       "Selfie Camera": "16 MP, f/2.0, 26mm (wide), 1/3.06\", 1.0Âµm",
       "Battery Type": "Li-Po 4300 mAh, non-removable",
       "Battery Charging": "100% in 55 min (advertised), 30W wired, PD"
@@ -60781,7 +60781,7 @@
       "Display Size": "104.6 cm2 (~90.6% screen-to-body ratio), 6.56 inches",
       "Display Resolution": "1080 x 2376 pixels (~398 ppi density)",
       "Internal Memory": "128GB 8GB RAM, 256GB 8GB RAM",
-      "Main Camera": "8 MP, f/3.4, 135mm (periscope telephoto), 1/4.0\", PDAF, OIS, 5x optical zoom, 8 MP, f/2.2, 120Ã‹Âš, 16mm (ultrawide), 1/4.0\", 1.12Ã‚Âµm, 13 MP, f/2.5, 50mm (telephoto), 1/2.8\", 0.8Ã‚Âµm, PDAF, 2x optical zoom, 48 MP, f/1.6, (wide), PDAF, gimbal OIS",
+      "Main Camera": "8 MP, f/2.2, 120Ã‹Âš, 16mm (ultrawide), 1/4.0\", 1.12Ã‚Âµm, 8 MP, f/3.4, 135mm (periscope telephoto), 1/4.0\", PDAF, OIS, 5x optical zoom, 13 MP, f/2.5, 50mm (telephoto), 1/2.8\", 0.8Ã‚Âµm, PDAF, 2x optical zoom, 48 MP, f/1.6, (wide), PDAF, gimbal OIS",
       "Selfie Camera": "32 MP, f/2.5, 26mm (wide), 1/2.8\", 0.8Ã‚Âµm",
       "Battery Type": "Li-Po 4315 mAh, non-removable",
       "Battery Charging": "57% in 30 min (advertised), 33W wired"
@@ -61645,7 +61645,7 @@
       "Display Size": "102.0 cm2 (~83.4% screen-to-body ratio), 6.5 inches",
       "Display Resolution": "1080 x 2400 pixels, 20:9 ratio (~405 ppi density)",
       "Internal Memory": "128GB 6GB RAM, 128GB 8GB RAM",
-      "Main Camera": "2 MP B/W, f/2.4, 2 MP, f/2.4, (depth), 8 MP, f/2.2, 119Ëš (ultrawide), 1/4.0\", 1.12Âµm, 48 MP, f/1.7, (wide), 1/2.0\", 0.8Âµm, PDAF",
+      "Main Camera": "2 MP, f/2.4, (depth), 2 MP B/W, f/2.4, 8 MP, f/2.2, 119Ëš (ultrawide), 1/4.0\", 1.12Âµm, 48 MP, f/1.7, (wide), 1/2.0\", 0.8Âµm, PDAF",
       "Selfie Camera": "16 MP, f/2.0, (wide), 1/3.06, 1.0Âµm",
       "Battery Type": "Li-Po 5000 mAh, non-removable",
       "Battery Charging": "18W wired"
@@ -61897,7 +61897,7 @@
       "Display Size": "104.2 cm2 (~85.0% screen-to-body ratio), 6.57 inches",
       "Display Resolution": "1080 x 2400 pixels, 20:9 ratio (~401 ppi density)",
       "Internal Memory": "128GB 6GB RAM, 128GB 8GB RAM, 256GB 8GB RAM, 64GB 6GB RAM",
-      "Main Camera": "2 MP, f/2.4, (macro), 8 MP, f/2.2, 15mm, 120Ã‹Âš (ultrawide), 1/4.0\", 1.12Ã‚Âµm, 8 MP, f/3.4, 122mm (periscope telephoto), PDAF, OIS, 5x optical zoom, 48 MP, f/1.8, 26mm (wide), 1/2.0\", 0.8Ã‚Âµm, PDAF",
+      "Main Camera": "2 MP, f/2.4, (macro), 8 MP, f/3.4, 122mm (periscope telephoto), PDAF, OIS, 5x optical zoom, 8 MP, f/2.2, 15mm, 120Ã‹Âš (ultrawide), 1/4.0\", 1.12Ã‚Âµm, 48 MP, f/1.8, 26mm (wide), 1/2.0\", 0.8Ã‚Âµm, PDAF",
       "Selfie Camera": "16 MP, f/2.5, (wide), 1/3.06\", 1.0Ã‚Âµm",
       "Battery Type": "Li-Po 4160 mAh, non-removable",
       "Battery Charging": "20W wired, PD3.0, QC4"
@@ -62149,7 +62149,7 @@
       "Display Size": "100.4 cm2 (~84.3% screen-to-body ratio), 6.4 inches",
       "Display Resolution": "1080 x 2400 pixels, 20:9 ratio (~408 ppi density)",
       "Internal Memory": "128GB 8GB RAM",
-      "Main Camera": "2 MP B/W, f/2.4, 1/5.0\", 1.75Âµm, 2 MP, f/2.4, (depth), 8 MP, f/2.2, 13mm (ultrawide), 1/4.0\", 1.12Âµm, 48 MP, f/1.7, 26mm (wide), 1/2.0\", 0.8Âµm, PDAF",
+      "Main Camera": "2 MP, f/2.4, (depth), 2 MP B/W, f/2.4, 1/5.0\", 1.75Âµm, 8 MP, f/2.2, 13mm (ultrawide), 1/4.0\", 1.12Âµm, 48 MP, f/1.7, 26mm (wide), 1/2.0\", 0.8Âµm, PDAF",
       "Selfie Camera": "32 MP, f/2.0, 26mm (wide), 1/2.8\", 0.8Âµm",
       "Battery Type": "Li-Po 4025 mAh, non-removable",
       "Battery Charging": "50% in 20 min (advertised), 30W wired"
@@ -62868,7 +62868,7 @@
       "Display Size": "102.0 cm2 (~83.8% screen-to-body ratio), 6.5 inches",
       "Display Resolution": "1080 x 2400 pixels, 20:9 ratio (~405 ppi density)",
       "Internal Memory": "128GB 6GB RAM, 128GB 8GB RAM, 256GB 8GB RAM",
-      "Main Camera": "2 MP, f/2.4, (depth), 8 MP, f/2.4, 80mm (telephoto), AF, 3x optical zoom, 8 MP, f/2.4, 17mm (ultrawide), 64 MP, f/1.8, 26mm (wide), 1/1.73\", 0.8Ã‚Âµm, PDAF",
+      "Main Camera": "2 MP, f/2.4, (depth), 8 MP, f/2.4, 17mm (ultrawide), 8 MP, f/2.4, 80mm (telephoto), AF, 3x optical zoom, 64 MP, f/1.8, 26mm (wide), 1/1.73\", 0.8Ã‚Âµm, PDAF",
       "Selfie Camera": "16 MP, f/2.0, (wide)",
       "Battery Type": "Li-Po 4000 mAh, non-removable",
       "Battery Charging": "70% in 30 min (advertised), 40W wired"
@@ -63606,7 +63606,7 @@
       "Display Size": "102.0 cm2 (~84.1% screen-to-body ratio), 6.5 inches",
       "Display Resolution": "1080 x 2400 pixels, 20:9 ratio (~405 ppi density)",
       "Internal Memory": "128GB 4GB RAM, 128GB 6GB RAM, 128GB 8GB RAM, 64GB 4GB RAM, 64GB 6GB RAM",
-      "Main Camera": "2 MP B/W, f/2.4, (depth), 2 MP, f/2.4, (macro), 8 MP, f/2.3, 13mm (ultrawide), 1/4.0\", 1.12Âµm, 64 MP, f/1.8, 26mm (wide), 1/1.72\", 0.8Âµm, PDAF",
+      "Main Camera": "2 MP, f/2.4, (macro), 2 MP B/W, f/2.4, (depth), 8 MP, f/2.3, 13mm (ultrawide), 1/4.0\", 1.12Âµm, 64 MP, f/1.8, 26mm (wide), 1/1.72\", 0.8Âµm, PDAF",
       "Selfie Camera": "16 MP, f/2.0, 26mm (wide), 1/3.06\", 1.0Âµm",
       "Battery Type": "Li-Po 4300 mAh, non-removable",
       "Battery Charging": "100% in 55 min (advertised), 30W wired"
@@ -64234,7 +64234,7 @@
       "Display Size": "108.0 cm2 (~90.5% screen-to-body ratio), 6.7 inches",
       "Display Resolution": "1440 x 3200 pixels, 20:9 ratio (~525 ppi density)",
       "Internal Memory": "128GB 8GB RAM",
-      "Main Camera": "0.3 MP, TOF 3D, f/1.0, (depth), 12 MP, f/2.2, 13mm, 120Ã‹Å¡ (ultrawide), 1/2.55\" 1.4Ã‚Âµm, Super Steady video, 12 MP, f/1.8, 26mm (wide), 1/1.76\", 1.8Ã‚Âµm, Dual Pixel PDAF, OIS, 64 MP, f/2.0, 29mm (telephoto), 1/1.72\", 0.8Ã‚Âµm, PDAF, OIS, 1.1x optical zoom, 3x hybrid zoom",
+      "Main Camera": "0.3 MP, TOF 3D, f/1.0, (depth), 12 MP, f/1.8, 26mm (wide), 1/1.76\", 1.8Ã‚Âµm, Dual Pixel PDAF, OIS, 12 MP, f/2.2, 13mm, 120Ã‹Å¡ (ultrawide), 1/2.55\" 1.4Ã‚Âµm, Super Steady video, 64 MP, f/2.0, 29mm (telephoto), 1/1.72\", 0.8Ã‚Âµm, PDAF, OIS, 1.1x optical zoom, 3x hybrid zoom",
       "Selfie Camera": "10 MP, f/2.2, 26mm (wide), 1/3.24\", 1.22Ã‚Âµm, Dual Pixel PDAF",
       "Battery Type": "Li-Ion 4500 mAh, non-removable",
       "Battery Charging": "25W wired, PD3.0 15W wireless (Qi/PMA) 4.5W reverse wireless"
@@ -64576,7 +64576,7 @@
       "Display Size": "100.4 cm2 (~85.5% screen-to-body ratio), 6.4 inches",
       "Display Resolution": "1080 x 2400 pixels, 20:9 ratio (~408 ppi density)",
       "Internal Memory": "128GB 4GB RAM, 128GB 8GB RAM",
-      "Main Camera": "2 MP, f/2.4, (depth), 2 MP B/W, f/2.4, 1/5.0\", 1.75Âµm, 8 MP, f/2.3, 13mm (ultrawide), 1/4.0\", 1.12Âµm, 48 MP, f/1.8, 26mm (wide), 1/2.0\", 0.8Âµm, PDAF",
+      "Main Camera": "2 MP B/W, f/2.4, 1/5.0\", 1.75Âµm, 2 MP, f/2.4, (depth), 8 MP, f/2.3, 13mm (ultrawide), 1/4.0\", 1.12Âµm, 48 MP, f/1.8, 26mm (wide), 1/2.0\", 0.8Âµm, PDAF",
       "Selfie Camera": "16 MP, f/2.0, 26mm (wide), 1/3.06\", 1.0Âµm",
       "Battery Type": "Li-Po 4025 mAh, non-removable",
       "Battery Charging": "50% in 30 min (advertised), 20W wired"
@@ -64648,7 +64648,7 @@
       "Display Size": "107.8 cm2 (~86.6% screen-to-body ratio), 6.7 inches",
       "Display Resolution": "1080 x 2400 pixels, 20:9 ratio (~394 ppi density)",
       "Internal Memory": "128GB 6GB RAM, 128GB 8GB RAM",
-      "Main Camera": "12 MP, f/2.4, 52mm (telephoto), 1/3.6\", 1.0Ã‚Âµm, PDAF, OIS, 2x optical zoom, 12 MP, f/2.2, 12mm (ultrawide), 12 MP, f/1.7, 27mm (wide), 1/2.55\", 1.4Ã‚Âµm, Dual Pixel PDAF, OIS",
+      "Main Camera": "12 MP, f/2.2, 12mm (ultrawide), 12 MP, f/1.7, 27mm (wide), 1/2.55\", 1.4Ã‚Âµm, Dual Pixel PDAF, OIS, 12 MP, f/2.4, 52mm (telephoto), 1/3.6\", 1.0Ã‚Âµm, PDAF, OIS, 2x optical zoom",
       "Selfie Camera": "32 MP, f/2.2, 25mm (wide), 1/2.8\", 0.8Ã‚Âµm",
       "Battery Type": "Li-Po 4500 mAh, non-removable",
       "Battery Charging": "25W wired"
@@ -65962,7 +65962,7 @@
       "Display Size": "104.7 cm2 (~84.9% screen-to-body ratio), 6.57 inches",
       "Display Resolution": "1080 x 2400 pixels, 20:9 ratio (~400 ppi density)",
       "Internal Memory": "128GB 6GB RAM, 128GB 8GB RAM",
-      "Main Camera": "8 MP, f/2.4, 80mm (telephoto), 1/4.0\", PDAF, OIS, 3x optical zoom, 8 MP, f/2.4, 16mm (ultrawide), 40 MP, f/1.8, 27mm (wide), 1/1.7\", PDAF, Laser AF",
+      "Main Camera": "8 MP, f/2.4, 16mm (ultrawide), 8 MP, f/2.4, 80mm (telephoto), 1/4.0\", PDAF, OIS, 3x optical zoom, 40 MP, f/1.8, 27mm (wide), 1/1.7\", PDAF, Laser AF",
       "Selfie Camera": "32 MP, f/2.0, 26mm (wide), 1/2.8\", 0.8Ã‚Âµm, 8 MP, f/2.2, 17mm (ultrawide)",
       "Battery Type": "Li-Po 4200 mAh, non-removable",
       "Battery Charging": "70% in 30 min (advertised), 40W wired"
@@ -67168,7 +67168,7 @@
       "Display Size": "108.7 cm2 (~94.1% screen-to-body ratio), 6.53 inches",
       "Display Resolution": "1176 x 2400 pixels, 18.5:9 ratio (~409 ppi density)",
       "Internal Memory": "128GB 8GB RAM, 256GB 8GB RAM",
-      "Main Camera": "TOF 3D, (depth), 8 MP, f/2.4, 80mm (telephoto), 1/4.0\", PDAF, OIS, 3x optical zoom, 40 MP, f/1.8, 18mm (ultrawide), 1/1.54\", PDAF, 40 MP, f/1.6, 27mm (wide), 1/1.7\", PDAF, OIS",
+      "Main Camera": "TOF 3D, (depth), 8 MP, f/2.4, 80mm (telephoto), 1/4.0\", PDAF, OIS, 3x optical zoom, 40 MP, f/1.6, 27mm (wide), 1/1.7\", PDAF, OIS, 40 MP, f/1.8, 18mm (ultrawide), 1/1.54\", PDAF",
       "Selfie Camera": "32 MP, f/2.0, 26mm (wide), 1/2.8\", 0.8Âµm, TOF 3D, (depth/biometrics sensor)",
       "Battery Type": "Li-Po 4500 mAh, non-removable",
       "Battery Charging": "40W wired 27W wireless Reverse wireless"
@@ -68319,7 +68319,7 @@
       "Display Size": "104.8 cm2 (~85.1% screen-to-body ratio), 6.5 inches",
       "Display Resolution": "1080 x 2340 pixels, 19.5:9 ratio (~394 ppi density)",
       "Internal Memory": "128GB 8GB RAM, 256GB 6GB RAM",
-      "Main Camera": "2 MP B/W, f/2.4, 1/5.0\", 1.75Âµm, 2 MP, f/2.4, (depth), 8 MP, f/2.2, 13mm (ultrawide), 1/4.0\", 1.12Âµm, 48 MP, f/1.7, 26mm (wide), 1/2.3\", 0.8Âµm, PDAF",
+      "Main Camera": "2 MP, f/2.4, (depth), 2 MP B/W, f/2.4, 1/5.0\", 1.75Âµm, 8 MP, f/2.2, 13mm (ultrawide), 1/4.0\", 1.12Âµm, 48 MP, f/1.7, 26mm (wide), 1/2.3\", 0.8Âµm, PDAF",
       "Selfie Camera": "Motorized pop-up 16 MP, f/2.0, 26mm (wide), 1/3.06\", 1.0Âµm",
       "Battery Type": "Li-Po 4000 mAh, non-removable",
       "Battery Charging": "20W wired"
@@ -71811,7 +71811,7 @@
       "Display Size": "185.6 cm2 (~74.4% screen-to-body ratio), 8.0 inches",
       "Display Resolution": "16:10 ratio (~283 ppi density), 1920 x 1200 pixels",
       "Internal Memory": "128GB 4GB RAM, 32GB 3GB RAM, 64GB 4GB RAM",
-      "Main Camera": "AF, f/2.0, 8 MP",
+      "Main Camera": "f/2.0, AF, 8 MP",
       "Selfie Camera": "8 MP, f/2.0",
       "Battery Type": "Li-Po 5100 mAh, non-removable",
       "Battery Charging": "10W wired"

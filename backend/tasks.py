@@ -1,3 +1,5 @@
+from google_client import get_gsc_service
+from datetime import date, timedelta
 import os
 import re
 import json
@@ -13,6 +15,7 @@ from bs4 import BeautifulSoup
 from shared_state import redis_client, log_terminal, log_action
 from celery.signals import worker_process_init
 from urllib.parse import urljoin
+import time
 
 
 from celery_app import app as celery_app
@@ -739,3 +742,318 @@ Generate the following fields for the new blog post.
     except Exception as e:
         log_terminal(f"❌ Error during manual content generation for job {job_id}: {e}")
         redis_client.set(f"job:{job_id}", json.dumps({"job_id": job_id, "status": "failed", "error": str(e)}))
+
+@celery_app.task(bind=True)
+def sync_wordpress_status_task(self):
+    """
+    Periodically syncs the status of published posts with the live WordPress site.
+    """
+    log_terminal("--- [SYNC TASK] Starting WordPress status synchronization ---")
+    
+    # Get credentials from environment variables
+    WP_URL = os.getenv("WP_URL")
+    WP_USER = os.getenv("WP_USERNAME")
+    WP_PASSWORD = os.getenv("WP_APPLICATION_PASSWORD")
+
+    if not all([WP_URL, WP_USER, WP_PASSWORD]):
+        log_terminal("❌ SYNC FAILED: WordPress credentials are not configured.")
+        return
+
+    auth_tuple = (WP_USER, WP_PASSWORD)
+    headers = {'User-Agent': 'ContentPipelineSync/1.0'}
+    
+    published_ids = list(redis_client.smembers("published_set"))
+    if not published_ids:
+        log_terminal("ℹ️ SYNC INFO: No published posts to sync.")
+        return
+        
+    log_terminal(f"ℹ️ SYNC INFO: Checking status for {len(published_ids)} published posts.")
+
+    for post_id_str in published_ids:
+        try:
+            # The wordpress_post_id is stored inside the draft object
+            post_key = f"draft:{post_id_str}"
+            post_data_json = redis_client.get(post_key)
+            if not post_data_json:
+                continue
+
+            post_data = json.loads(post_data_json)
+            wp_post_id = post_data.get('wordpress_post_id')
+            if not wp_post_id:
+                continue
+
+            # Check post status on WordPress
+            post_url = f"{WP_URL.rstrip('/')}/wp-json/wp/v2/posts/{wp_post_id}?context=view"
+            response = requests.get(post_url, headers=headers, auth=auth_tuple, timeout=15)
+
+            if response.status_code == 404:
+                # The post was deleted on WordPress
+                log_terminal(f"⚠️  SYNC WARNING: Post {wp_post_id} not found on WordPress. Removing from local published set.")
+                redis_client.srem("published_set", post_id_str)
+                # Optionally, you could change the local status to "archived"
+                post_data['status'] = 'archived'
+                redis_client.set(post_key, json.dumps(post_data))
+
+            response.raise_for_status() # Raise an exception for other HTTP errors (e.g., 500)
+            
+            # Optional: You could also check for and sync URL/slug changes here
+            
+            # --- Add a responsible delay ---
+            time.sleep(1) 
+
+        except requests.exceptions.RequestException as e:
+            log_terminal(f"❌ SYNC ERROR: Could not check post {wp_post_id}. Error: {e}")
+            continue # Skip to the next post
+        except Exception as e:
+            log_terminal(f"❌ UNEXPECTED SYNC ERROR for post {wp_post_id}: {e}")
+            continue
+
+    log_terminal("--- [SYNC TASK] WordPress synchronization complete ---")
+
+@celery_app.task(bind=True)
+def full_wordpress_sync_task(self):
+    """
+    Performs a full, two-way synchronization between the app's database and the live
+    WordPress site, including both posts and WooCommerce products.
+    """
+    log_terminal("--- [SYNC TASK] Starting full WordPress synchronization ---")
+    
+    WP_URL = os.getenv("WP_URL")
+    WP_USER = os.getenv("WP_USERNAME")
+    WP_PASSWORD = os.getenv("WP_APPLICATION_PASSWORD")
+
+    if not all([WP_URL, WP_USER, WP_PASSWORD]):
+        log_terminal("❌ SYNC FAILED: WordPress credentials are not configured.")
+        return
+
+    auth_tuple = (WP_USER, WP_PASSWORD)
+    headers = {'User-Agent': 'ContentPipelineSync/1.0'}
+    
+    live_content = {}
+    
+    # --- Step 1: Fetch all live content from WordPress ---
+    for post_type in ['posts', 'products']:
+        try:
+            page = 1
+            while True:
+                url = f"{WP_URL.rstrip('/')}/wp-json/wp/v2/{post_type}?per_page=100&page={page}&status=publish&context=view"
+                response = requests.get(url, headers=headers, auth=auth_tuple, timeout=30)
+                response.raise_for_status()
+                
+                content_batch = response.json()
+                if not content_batch:
+                    break # No more content of this type
+                
+                for item in content_batch:
+                    live_content[str(item['id'])] = {
+                        "title": item['title']['rendered'],
+                        "slug": item['slug'],
+                        "link": item['link'],
+                        "type": item['type'] # 'post' or 'product'
+                    }
+                
+                log_terminal(f"ℹ️ SYNC INFO: Fetched page {page} of {post_type}.")
+                page += 1
+                time.sleep(5) # Be respectful to the server
+
+        except requests.exceptions.RequestException as e:
+            log_terminal(f"❌ SYNC ERROR: Could not fetch {post_type} from WordPress. Error: {e}")
+            continue # Try the next post type if one fails
+
+    log_terminal(f"✅ SYNC: Found {len(live_content)} total live items (posts and products) on WordPress.")
+
+    # --- Step 2: Compare and Reconcile ---
+    local_published_ids = {str(json.loads(redis_client.get(f"draft:{pid}")).get('wordpress_post_id')) for pid in redis_client.smembers("published_set")}
+    live_ids = set(live_content.keys())
+
+    # Posts to import (live on WP, not in our DB)
+    ids_to_import = live_ids - local_published_ids
+    # Posts to archive (in our DB, not live on WP)
+    ids_to_archive = local_published_ids - live_ids
+
+    log_terminal(f"ℹ️ SYNC: Found {len(ids_to_import)} new items to import and {len(ids_to_archive)} items to archive.")
+
+    # --- Step 3: Perform Actions ---
+    for wp_id in ids_to_import:
+        item = live_content[wp_id]
+        new_draft_id = f"draft_{uuid.uuid4().hex[:10]}"
+        draft_data = {
+            "draft_id": new_draft_id,
+            "wordpress_post_id": int(wp_id),
+            "status": "published",
+            "source_url": item['link'],
+            "post_title": item['title'],
+            "slug": item['slug'],
+            "draft_type": "woocommerce_product" if item['type'] == 'product' else 'wordpress_post',
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            # Add default empty values for other required fields
+            "original_content": {"source": "Imported from WordPress"},
+            "llm_prompt_template": "", "content_history": [], "image_history": [], "featured_image_b64": None,
+            "focus_keyphrase": "", "seo_title": "", "meta_description": "", "post_category": "", "post_tags": [],
+            "post_excerpt": "", "featured_image_prompt": "", "image_alt_text": "", "image_title": "", "post_content_html": ""
+        }
+        redis_client.set(f"draft:{new_draft_id}", json.dumps(draft_data))
+        redis_client.sadd("published_set", new_draft_id)
+        log_terminal(f"✅ SYNC: Imported new live content '{item['title']}'")
+
+    for wp_id in ids_to_archive:
+        # Find the draft by its WordPress ID
+        for draft_id in redis_client.smembers("published_set"):
+            post_data = json.loads(redis_client.get(f"draft:{draft_id}"))
+            if str(post_data.get('wordpress_post_id')) == wp_id:
+                post_data['status'] = 'archived'
+                redis_client.set(f"draft:{draft_id}", json.dumps(post_data))
+                redis_client.srem("published_set", draft_id)
+                log_terminal(f"🗑️ SYNC: Archived post '{post_data.get('post_title')}' as it's no longer live.")
+                break
+
+    log_terminal("--- [SYNC TASK] Full WordPress synchronization complete ---")
+
+@celery_app.task(bind=True)
+def fetch_gsc_data_task(self):
+    """
+    Periodically fetches GSC data for all published posts and caches it.
+    """
+    log_terminal("--- [GSC TASK] Starting daily data fetch ---")
+    
+    service = get_gsc_service()
+    active_site = redis_client.get("gsc_active_site")
+
+    if not service or not active_site:
+        log_terminal("❌ GSC TASK FAILED: GSC not connected or no active site selected.")
+        return
+
+    published_ids = redis_client.smembers("published_set")
+    if not published_ids:
+        log_terminal("ℹ️ GSC TASK INFO: No published posts to fetch data for.")
+        return
+
+    # Create a mapping of slug -> draft_id for efficient lookups later
+    slug_to_id_map = {}
+    WP_URL = os.getenv("WP_URL", "").rstrip('/')
+    for post_id in published_ids:
+        post_data_json = redis_client.get(f"draft:{post_id}")
+        if post_data_json:
+            slug = json.loads(post_data_json).get('slug')
+            if slug:
+                slug_to_id_map[slug] = post_id
+
+    if not slug_to_id_map:
+        log_terminal("ℹ️ GSC TASK INFO: No valid URLs found for published posts.")
+        return
+
+    log_terminal(f"ℹ️ GSC TASK INFO: Fetching data for {len(slug_to_id_map)} URLs from {active_site}.")
+
+    # --- THE FIX: Loop through each post and make an individual API call ---
+    yesterday_str = (date.today() - timedelta(days=1)).strftime('%Y-%m-%d')
+    cached_count = 0
+
+    for slug, draft_id in slug_to_id_map.items():
+        try:
+            post_url = f"{WP_URL}/{slug}/"
+            
+            request = {
+                'startDate': yesterday_str,
+                'endDate': yesterday_str,
+                'dimensions': ['page'],
+                'dimensionFilterGroups': [{
+                    'filters': [{
+                        'dimension': 'page',
+                        'operator': 'equals', # Use 'equals' for a single URL
+                        'expression': post_url
+                    }]
+                }]
+            }
+            
+            response = service.searchanalytics().query(siteUrl=active_site, body=request).execute()
+            rows = response.get('rows', [])
+            
+            if rows:
+                row = rows[0]
+                clicks = row['clicks']
+                impressions = row['impressions']
+                
+                cache_key = f"gsc:metrics:{draft_id}:{yesterday_str}"
+                redis_client.set(cache_key, json.dumps({"clicks": clicks, "impressions": impressions}), ex=90*86400)
+                cached_count += 1
+            
+            # Be respectful to the API and avoid rate limits
+            time.sleep(1)
+
+        except Exception as e:
+            log_terminal(f"❌ GSC TASK WARNING: Could not fetch data for {slug}. Error: {e}")
+            continue # Continue to the next post even if one fails
+
+    log_terminal(f"✅ GSC TASK: Successfully cached metrics for {cached_count} pages.")
+    log_terminal("--- [GSC TASK] Daily data fetch complete ---")
+
+@celery_app.task(bind=True)
+def fetch_gsc_insights_task(self):
+    """
+    Runs weekly to fetch high-level GSC insights and caches them.
+    """
+    log_terminal("--- [GSC INSIGHTS TASK] Starting weekly data fetch ---")
+    
+    service = get_gsc_service()
+    active_site = redis_client.get("gsc_active_site")
+
+    if not service or not active_site:
+        log_terminal("❌ GSC INSIGHTS FAILED: GSC not connected or no active site selected.")
+        return
+
+    try:
+        # Define the date ranges: last 28 days and the 28 days prior
+        today = date.today()
+        end_date_current = today - timedelta(days=2) # GSC data has a delay
+        start_date_current = end_date_current - timedelta(days=27)
+        
+        # --- 1. Fetch Top 10 Content ---
+        request_top_content = {
+            'startDate': start_date_current.strftime('%Y-%m-%d'),
+            'endDate': end_date_current.strftime('%Y-%m-%d'),
+            'dimensions': ['page'],
+            'rowLimit': 10
+        }
+        response_top_content = service.searchanalytics().query(siteUrl=active_site, body=request_top_content).execute()
+        top_content = response_top_content.get('rows', [])
+        log_terminal(f"✅ GSC INSIGHTS: Fetched {len(top_content)} top content pages.")
+        time.sleep(1) # Delay between API calls
+
+        # --- 2. Fetch Top 10 Queries ---
+        request_top_queries = {
+            'startDate': start_date_current.strftime('%Y-%m-%d'),
+            'endDate': end_date_current.strftime('%Y-%m-%d'),
+            'dimensions': ['query'],
+            'rowLimit': 10
+        }
+        response_top_queries = service.searchanalytics().query(siteUrl=active_site, body=request_top_queries).execute()
+        top_queries = response_top_queries.get('rows', [])
+        log_terminal(f"✅ GSC INSIGHTS: Fetched {len(top_queries)} top queries.")
+        time.sleep(1)
+
+        # --- 3. Fetch Top 5 Countries ---
+        request_top_countries = {
+            'startDate': start_date_current.strftime('%Y-%m-%d'),
+            'endDate': end_date_current.strftime('%Y-%m-%d'),
+            'dimensions': ['country'],
+            'rowLimit': 5
+        }
+        response_top_countries = service.searchanalytics().query(siteUrl=active_site, body=request_top_countries).execute()
+        top_countries = response_top_countries.get('rows', [])
+        log_terminal(f"✅ GSC INSIGHTS: Fetched {len(top_countries)} top countries.")
+
+        # --- Assemble and Cache the final insights object ---
+        insights_data = {
+            "top_content": top_content,
+            "top_queries": top_queries,
+            "top_countries": top_countries,
+            "last_updated": datetime.now(timezone.utc).isoformat()
+        }
+        
+        redis_client.set("gsc_insights_cache", json.dumps(insights_data))
+        log_terminal("✅ GSC INSIGHTS: Successfully cached all insights data.")
+
+    except Exception as e:
+        log_terminal(f"❌ GSC INSIGHTS ERROR: Failed to fetch or cache GSC insights. Error: {e}")
+
+    log_terminal("--- [GSC INSIGHTS TASK] Weekly data fetch complete ---")

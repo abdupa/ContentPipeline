@@ -12,3 +12,5 @@ uvicorn
 python-multipart
 woocommerce
 dateparser
+google-auth-oauthlib
+google-api-python-client

@@ -28,7 +28,7 @@ const AllPostsView = ({ onEditDraft }) => {
     setIsLoading(true);
     setError(null);
     try {
-      const response = await apiClient.get('/api/posts');
+      const response = await apiClient.get('/api/posts/with-stats');
       setPosts(response.data.map(post => ({ ...post, id: post.draft_id })));
     } catch (err) {
       setError('Failed to load posts. Please ensure the backend is running.');
@@ -58,13 +58,36 @@ const AllPostsView = ({ onEditDraft }) => {
   };
 
   const columns = [
-    { key: '#', label: '#', sortable: false },
+    { key: '#', label: '#', sortable: true },
     { key: 'post_title', label: 'Title', sortable: true },
     { 
       key: 'status', 
       label: 'Status', 
       sortable: true,
       render: (status) => <StatusBadge status={status} />
+    },
+    { key: 'clicks', label: 'Clicks', sortable: true },
+    { key: 'impressions', label: 'Impressions', sortable: true },
+    { 
+      key: 'source_url', 
+      label: 'Live URL', 
+      sortable: false, // Sorting by URL isn't very useful
+      render: (url) => (
+        url && url !== 'manual' ? (
+          <a 
+            href={url} 
+            target="_blank" 
+            rel="noopener noreferrer" 
+            className="text-indigo-600 hover:text-indigo-800 hover:underline truncate"
+            onClick={(e) => e.stopPropagation()} // Prevents row click if we add it later
+          >
+            {/* Display a shortened version for cleanliness */}
+            {url.replace(/^(https?:\/\/)?(www\.)?/, '').substring(0, 30)}...
+          </a>
+        ) : (
+          <span className="text-gray-400">N/A</span>
+        )
+      )
     },
     {
       key: 'generated_at',

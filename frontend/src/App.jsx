@@ -12,6 +12,9 @@ import ActionHistoryView from './components/ActionHistoryView.jsx';
 import { HelpCircle, Bell, ChevronDown } from 'lucide-react';
 import PublishedPostsView from './components/PublishedPostsView.jsx';
 import ManualEditorView from './components/ManualEditorView.jsx';
+import SettingsView from './components/SettingsView.jsx';
+import PerformanceView from './components/PerformanceView.jsx';
+import InsightsView from './components/InsightsView.jsx';
 
 
 const App = () => {
@@ -21,15 +24,28 @@ const App = () => {
   const [draftToEditId, setDraftToEditId] = useState(null);
   const intervalRef = useRef(null);
 
+  // --- NEW: This hook runs once on initial load to check the URL ---
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.has('status')) {
+      // If we are coming back from the Google OAuth flow,
+      // force the view to the settings page.
+      setCurrentView('settings');
+    }
+  }, []); // The empty array ensures this runs only once.
+
   const handleMenuItemClick = (itemName) => {
     if (intervalRef.current) clearInterval(intervalRef.current);
     if (itemName === 'Dashboard') setCurrentView('dashboard');
+    else if (itemName === 'Insights') setCurrentView('insights');
+    else if (itemName === 'Performance') setCurrentView('performance');
     else if (itemName === 'Scraping Projects') setCurrentView('projects');
     else if (itemName === 'Manual Editor') setCurrentView('manualEditor');
     else if (itemName === 'Content Library') setCurrentView('allPosts');
     else if (itemName === 'Approval Queue') setCurrentView('approvalQueue');
     else if (itemName === 'Published Posts') setCurrentView('publishedPosts'); // <-- NEW
     else if (itemName === 'Action History') setCurrentView('actionHistory');
+    else if (itemName === 'Settings') setCurrentView('settings');
     else alert(`Navigating to: ${itemName}`);
   };
 
@@ -70,12 +86,15 @@ const App = () => {
   };
 
   const getActiveSidebarItem = () => {
-    if (['projects', 'scrapeWizard', 'scrapeJobStatus'].includes(currentView)) return 'Scrape Content';
+    if (currentView === 'insights') return 'Insights';
+    if (currentView === 'performance') return 'Performance';
+    if (['projects', 'scrapeWizard', 'scrapeJobStatus'].includes(currentView)) return 'Scraping Projects';
     if (['approvalQueue', 'contentEditor'].includes(currentView)) return 'Approval Queue';
     if (currentView === 'manualEditor') return 'Manual Editor';
     if (currentView === 'allPosts') return 'Content Library';
     if (currentView === 'publishedPosts') return 'Published Posts'; // <-- NEW
     if (currentView === 'actionHistory') return 'Action History';
+    if (currentView === 'settings') return 'Settings';
     return 'Dashboard';
   };
   
@@ -83,6 +102,10 @@ const App = () => {
     switch (currentView) {
       case 'dashboard':
         return <DashboardView handleMenuItemClick={handleMenuItemClick} />;
+      case 'insights':
+        return <InsightsView />;
+      case 'performance':
+        return <PerformanceView />;
       case 'projects':
         return <ProjectsView 
                   onCreateNew={() => { setProjectToEdit(null); setCurrentView('scrapeWizard'); }} 
@@ -106,6 +129,8 @@ const App = () => {
         return <ApprovalQueueView onEditDraft={handleEditDraft} />;
       case 'actionHistory':
         return <ActionHistoryView />;
+      case 'settings': // <-- ADD THIS
+        return <SettingsView />;
       case 'contentEditor':
         return <ContentEditorView draftId={draftToEditId} onBack={() => setCurrentView('approvalQueue')} />;
       default:

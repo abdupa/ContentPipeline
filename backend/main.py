@@ -1,3 +1,7 @@
+from fastapi.responses import FileResponse
+from google_client import get_gsc_service
+from google_auth_oauthlib.flow import Flow
+from fastapi.responses import RedirectResponse
 import uuid
 import json
 import base64
@@ -6,7 +10,7 @@ import os
 import time
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date, timedelta
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from shared_state import redis_client, log_terminal
@@ -103,6 +107,76 @@ class Draft(BaseModel):
 class RegeneratePayload(BaseModel):
     edited_prompt: str
 
+class SiteSelectionPayload(BaseModel):
+    site_url: str
+
+# --- Authentication ---
+# This is the same redirect URI we configured in the Google Cloud Console.
+REDIRECT_URI = "http://localhost:8000/api/auth/callback"
+# This defines the permission we are asking for.
+SCOPES = ["https://www.googleapis.com/auth/webmasters.readonly"]
+
+@app.get("/api/auth/google")
+async def auth_google():
+    """
+    Redirects the user to Google's OAuth consent screen.
+    """
+    flow = Flow.from_client_secrets_file(
+        'client_secret.json', # We will create this file next
+        scopes=SCOPES,
+        redirect_uri=REDIRECT_URI
+    )
+    authorization_url, state = flow.authorization_url(
+        access_type='offline',
+        include_granted_scopes='true'
+    )
+    # In a real app, you would store the 'state' in the user's session
+    # For now, we will log it for debugging.
+    log_terminal(f"OAuth state created: {state}")
+    return RedirectResponse(authorization_url)
+
+@app.get("/api/auth/callback")
+async def auth_callback(code: str, state: str):
+    """
+    Handles the callback from Google, fetches credentials, and securely stores them.
+    """
+    log_terminal(f"--- HIT: GET /api/auth/callback ---")
+    log_terminal(f"Received OAuth code: {code}")
+    
+    flow = Flow.from_client_secrets_file(
+        'client_secret.json',
+        scopes=SCOPES,
+        redirect_uri=REDIRECT_URI
+    )
+    
+    try:
+        # Exchange the authorization code for a credentials token
+        flow.fetch_token(code=code)
+        credentials = flow.credentials
+
+        # Convert the credentials to a dictionary format for storing in Redis
+        creds_dict = {
+            'token': credentials.token,
+            'refresh_token': credentials.refresh_token,
+            'token_uri': credentials.token_uri,
+            'client_id': credentials.client_id,
+            'client_secret': credentials.client_secret,
+            'scopes': credentials.scopes
+        }
+        
+        # --- THE FIX: Securely store the credentials in Redis ---
+        # We'll save them as a JSON string under a single, well-known key.
+        redis_client.set("gsc_credentials", json.dumps(creds_dict))
+        log_terminal(f"✅ Successfully fetched and stored GSC credentials in Redis.")
+        
+        # Redirect the user back to the frontend root so the app can handle routing
+        return RedirectResponse("http://localhost:5173/?status=success")
+
+    except Exception as e:
+        log_terminal(f"❌ Failed to fetch or store GSC token: {e}")
+        # Redirect back to the frontend with an error status
+        return RedirectResponse("http://localhost:5173/?status=error")
+
 # --- WordPress Helper Functions ---
 def publish_to_woocommerce(draft_data: dict, wp_url: str, auth_tuple: tuple, media_id: int):
     log_terminal(f"📦 Publishing draft {draft_data['draft_id']} to WooCommerce...")
@@ -138,6 +212,7 @@ def get_or_create_term(name: str, term_type: str, base_url: str, auth_tuple: tup
         log_terminal(f"❌ Could not get or create {term_type[:-1]} '{name}': {e}")
         return None
 
+# Endpoints starts here...
 @app.post("/api/drafts/manual", status_code=202)
 async def create_manual_draft(payload: ManualDraftPayload):
     """
@@ -446,6 +521,165 @@ async def get_dashboard_stats():
         log_terminal(f"❌ ERROR in /api/dashboard/stats: {e}") # <-- Enhanced Error Log
         raise HTTPException(status_code=500, detail="Failed to retrieve dashboard stats.")
 
+# --- NEW: Google Search Console Integration ---
+
+@app.get("/api/gsc/sites")
+async def get_gsc_sites():
+    """
+    Fetches a list of websites verified in the user's GSC account.
+    """
+    log_terminal("--- HIT: GET /api/gsc/sites ---")
+    service = get_gsc_service()
+    if not service:
+        raise HTTPException(status_code=401, detail="User is not authenticated with Google.")
+    
+    try:
+        site_list = service.sites().list().execute()
+        return site_list.get('siteEntry', [])
+    except Exception as e:
+        log_terminal(f"❌ Failed to fetch GSC sites: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch sites from Google Search Console.")
+
+# --- NEW: Database Management ---
+@app.post("/api/database/backup", status_code=202)
+async def create_database_backup():
+    """
+    Triggers a background save of the Redis database to its dump file.
+    """
+    log_terminal("--- HIT: POST /api/database/backup ---")
+    try:
+        redis_client.bgsave()
+        log_action("MANUAL_BACKUP_CREATED")
+        return {"message": "Database backup process started in the background. It may take a moment to complete."}
+    except Exception as e:
+        log_terminal(f"❌ ERROR triggering database backup: {e}")
+        raise HTTPException(status_code=500, detail="Failed to start database backup.")
+
+@app.get("/api/database/backup/download")
+async def download_database_backup():
+    """
+    Allows the user to download the latest Redis backup file.
+    """
+    log_terminal("--- HIT: GET /api/database/backup/download ---")
+    # This path is determined by the 'volumes' section in your docker-compose.yml
+    # It points to the location of the redis-data volume on the host machine.
+    # This is a common default path for Docker on Linux.
+    backup_file_path = "/var/lib/docker/volumes/contentpipeline_redis-data/_data/dump.rdb"
+    
+    if not os.path.exists(backup_file_path):
+        log_terminal(f"❌ Backup file not found at {backup_file_path}")
+        raise HTTPException(status_code=404, detail="Backup file not found. Please generate a backup first.")
+    
+    return FileResponse(path=backup_file_path, filename="redis_backup.rdb", media_type='application/octet-stream')
+
+@app.get("/api/posts/{post_id}/seo-stats")
+async def get_post_seo_stats(post_id: str):
+    """
+    Fetches basic SEO stats (clicks, impressions) for a single post.
+    NOTE: This is a placeholder for our future daily caching task.
+    For now, it performs a live API call for demonstration.
+    """
+    log_terminal(f"--- HIT: GET /api/posts/{post_id}/seo-stats ---")
+    service = get_gsc_service()
+    if not service:
+        raise HTTPException(status_code=401, detail="User is not authenticated with Google.")
+
+    post_key = f"draft:{post_id}"
+    post_json = redis_client.get(post_key)
+    if not post_json:
+        raise HTTPException(status_code=404, detail="Post not found.")
+    
+    post_data = json.loads(post_json)
+    post_url = post_data.get("source_url") # Assuming source_url is the published URL for now
+    
+    # We need to know which GSC site to query. For now, we'll hardcode it.
+    # In the future, this will come from a user setting.
+    # IMPORTANT: Replace 'https://www.gadgetph.com/' with the URL you have in GSC.
+    site_url = "https://www.gadgetph.com/" 
+
+    try:
+        request = {
+            'startDate': '2025-01-01', # A wide date range for now
+            'endDate': '2025-12-31',
+            'dimensions': ['page'],
+            'dimensionFilterGroups': [{
+                'filters': [{
+                    'dimension': 'page',
+                    'operator': 'equals',
+                    'expression': post_url
+                }]
+            }]
+        }
+        response = service.searchanalytics().query(siteUrl=site_url, body=request).execute()
+        
+        # Process the response
+        rows = response.get('rows', [])
+        if not rows:
+            return {"clicks": 0, "impressions": 0}
+        
+        return {
+            "clicks": rows[0]['clicks'],
+            "impressions": rows[0]['impressions']
+        }
+
+    except Exception as e:
+        log_terminal(f"❌ Failed to fetch SEO stats for {post_url}: {e}")
+        return {"clicks": "N/A", "impressions": "N/A"}
+
+@app.get("/api/dashboard/seo-performance-graph")
+async def get_seo_performance_graph_data():
+    """
+    Aggregates the last 30 days of GSC data for the dashboard chart.
+    """
+    log_terminal("--- HIT: GET /api/dashboard/seo-performance-graph ---")
+    
+    end_date = date.today()
+    start_date = end_date - timedelta(days=30)
+    
+    published_ids = redis_client.smembers("published_set")
+    if not published_ids:
+        return []
+
+    aggregated_data = {}
+    current_date = start_date
+    while current_date < end_date:
+        day_str = current_date.strftime('%Y-%m-%d')
+        daily_total_clicks = 0
+        daily_total_impressions = 0
+        
+        for post_id in published_ids:
+            cache_key = f"gsc:metrics:{post_id}:{day_str}"
+            cached_metric = redis_client.get(cache_key)
+            if cached_metric:
+                metric_data = json.loads(cached_metric)
+                daily_total_clicks += metric_data.get('clicks', 0)
+                daily_total_impressions += metric_data.get('impressions', 0)
+        
+        aggregated_data[day_str] = {
+            "clicks": daily_total_clicks,
+            "impressions": daily_total_impressions
+        }
+        current_date += timedelta(days=1)
+        
+    chart_data = [{"date": day, "clicks": data["clicks"], "impressions": data["impressions"]} for day, data in aggregated_data.items()]
+    
+    return chart_data
+
+@app.post("/api/gsc/fetch-now", status_code=202)
+async def trigger_gsc_fetch():
+    """
+    Manually triggers the GSC data fetching background task.
+    """
+    log_terminal("--- HIT: POST /api/gsc/fetch-now ---")
+    try:
+        # Import the task and queue it immediately
+        from tasks import fetch_gsc_data_task
+        fetch_gsc_data_task.delay()
+        return {"message": "GSC data fetch task has been successfully queued."}
+    except Exception as e:
+        log_terminal(f"❌ ERROR triggering GSC fetch task: {e}")
+        raise HTTPException(status_code=500, detail="Failed to queue the GSC data fetch task.")
+
 @app.get("/api/posts", response_model=List[Draft])
 async def get_all_posts():
     """
@@ -593,3 +827,178 @@ async def delete_project(project_id: str):
     except Exception as e:
         log_terminal(f"❌ ERROR in /api/projects/{project_id}: {e}")
         raise HTTPException(status_code=500, detail="An unexpected error occurred during project deletion.")
+    
+@app.post("/api/gsc/active-site")
+async def set_active_gsc_site(payload: SiteSelectionPayload):
+    """
+    Saves the user's selected GSC site URL to Redis.
+    """
+    log_terminal(f"--- HIT: POST /api/gsc/active-site ---")
+    try:
+        redis_client.set("gsc_active_site", payload.site_url)
+        log_action("GSC_SITE_SELECTED", {"site_url": payload.site_url})
+        log_terminal(f"✅ Active GSC site set to: {payload.site_url}")
+        return {"message": "Active site updated successfully."}
+    except Exception as e:
+        log_terminal(f"❌ ERROR setting active GSC site: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save active site selection.")
+
+@app.get("/api/gsc/active-site")
+async def get_active_gsc_site():
+    """
+    Retrieves the currently selected active GSC site URL from Redis.
+    """
+    log_terminal("--- HIT: GET /api/gsc/active-site ---")
+    try:
+        active_site = redis_client.get("gsc_active_site")
+        if not active_site:
+            # Return a default empty response if no site has been selected yet
+            return {"site_url": None}
+        return {"site_url": active_site}
+    except Exception as e:
+        log_terminal(f"❌ ERROR getting active GSC site: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve active site selection.")
+    
+@app.post("/api/sync/wordpress", status_code=202)
+async def trigger_wordpress_sync():
+    """
+    Manually triggers the WordPress post synchronization task.
+    """
+    log_terminal("--- HIT: POST /api/sync/wordpress ---")
+    try:
+        from tasks import full_wordpress_sync_task
+        full_wordpress_sync_task.delay()
+        return {"message": "WordPress synchronization task has been successfully queued."}
+    except Exception as e:
+        log_terminal(f"❌ ERROR triggering WordPress sync task: {e}")
+        raise HTTPException(status_code=500, detail="Failed to queue the WordPress sync task.")
+    
+@app.get("/api/gsc/performance")
+async def get_gsc_performance_data(start_date_str: str, end_date_str: str):
+    """
+    Aggregates GSC data for a specified date range.
+    Dates should be in YYYY-MM-DD format.
+    """
+    log_terminal(f"--- HIT: GET /api/gsc/performance (Range: {start_date_str} to {end_date_str}) ---")
+    
+    try:
+        start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+        end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Please use YYYY-MM-DD.")
+
+    published_ids = redis_client.smembers("published_set")
+    if not published_ids:
+        return {"summary": {"total_clicks": 0, "total_impressions": 0}, "daily_data": []}
+
+    # Aggregate data for the date range
+    aggregated_data = {}
+    total_clicks = 0
+    total_impressions = 0
+    
+    current_date = start_date
+    while current_date <= end_date:
+        day_str = current_date.strftime('%Y-%m-%d')
+        daily_total_clicks = 0
+        daily_total_impressions = 0
+        
+        for post_id in published_ids:
+            cache_key = f"gsc:metrics:{post_id}:{day_str}"
+            cached_metric = redis_client.get(cache_key)
+            if cached_metric:
+                metric_data = json.loads(cached_metric)
+                daily_total_clicks += metric_data.get('clicks', 0)
+                daily_total_impressions += metric_data.get('impressions', 0)
+        
+        aggregated_data[day_str] = {
+            "clicks": daily_total_clicks,
+            "impressions": daily_total_impressions
+        }
+        total_clicks += daily_total_clicks
+        total_impressions += daily_total_impressions
+        
+        current_date += timedelta(days=1)
+        
+    # Format data for the chart and summary
+    chart_data = [{"date": day, "clicks": data["clicks"], "impressions": data["impressions"]} for day, data in aggregated_data.items()]
+    summary_data = {"total_clicks": total_clicks, "total_impressions": total_impressions}
+    
+    return {"summary": summary_data, "daily_data": chart_data}
+
+@app.get("/api/posts/with-stats")
+async def get_all_posts_with_stats():
+    """
+    Fetches all posts and enriches published ones with the latest GSC stats.
+    """
+    log_terminal("--- HIT: GET /api/posts/with-stats ---")
+    try:
+        draft_ids = redis_client.smembers("drafts_set")
+        published_ids = redis_client.smembers("published_set")
+        all_ids = draft_ids.union(published_ids)
+        if not all_ids:
+            return []
+        
+        post_keys = [f"draft:{pid}" for pid in all_ids]
+        posts_json = redis_client.mget(post_keys)
+        
+        all_posts = []
+        yesterday_str = (date.today() - timedelta(days=1)).strftime('%Y-%m-%d')
+
+        for post_json in posts_json:
+            if not post_json: continue
+            
+            post = json.loads(post_json)
+            # If the post is published, try to find its stats
+            if post.get("status") == "published":
+                cache_key = f"gsc:metrics:{post['draft_id']}:{yesterday_str}"
+                cached_metric = redis_client.get(cache_key)
+                if cached_metric:
+                    metric_data = json.loads(cached_metric)
+                    post['clicks'] = metric_data.get('clicks', 0)
+                    post['impressions'] = metric_data.get('impressions', 0)
+                else:
+                    post['clicks'] = 0
+                    post['impressions'] = 0
+            all_posts.append(post)
+            
+        return all_posts
+    except Exception as e:
+        log_terminal(f"❌ Could not retrieve posts with stats: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve posts with stats.")
+
+@app.get("/api/gsc/insights")
+async def get_gsc_insights():
+    """
+    Retrieves the latest cached GSC insights data.
+    """
+    log_terminal("--- HIT: GET /api/gsc/insights ---")
+    try:
+        insights_json = redis_client.get("gsc_insights_cache")
+        if not insights_json:
+            # Return an empty structure if no insights have been cached yet
+            return {
+                "top_content": [],
+                "top_queries": [],
+                "top_countries": [],
+                "last_updated": None
+            }
+        
+        insights_data = json.loads(insights_json)
+        return insights_data
+    except Exception as e:
+        log_terminal(f"❌ ERROR getting GSC insights: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve GSC insights data.")
+    
+@app.post("/api/gsc/fetch-insights-now", status_code=202)
+async def trigger_gsc_insights_fetch():
+    """
+    Manually triggers the GSC insights fetching background task.
+    """
+    log_terminal("--- HIT: POST /api/gsc/fetch-insights-now ---")
+    try:
+        from tasks import fetch_gsc_insights_task
+        fetch_gsc_insights_task.delay()
+        return {"message": "GSC insights fetch task has been successfully queued."}
+    except Exception as e:
+        log_terminal(f"❌ ERROR triggering GSC insights task: {e}")
+        raise HTTPException(status_code=500, detail="Failed to queue the GSC insights fetch task.")

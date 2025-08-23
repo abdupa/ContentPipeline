@@ -57,6 +57,23 @@ services:
       - backend
       - redis
 
+  celery-beat:
+      build: ./backend
+      image: contentgen-backend:latest
+      command: celery -A celery_app.app beat --loglevel=info
+      env_file:
+        - .env
+      volumes:
+        - ./backend:/app
+        - /app/venv
+      environment:
+        - CELERY_BROKER_URL=redis://redis:6379/0
+        - CELERY_RESULT_BACKEND=redis://redis:6379/0
+        - PYTHONPATH=/app
+      depends_on:
+        - redis
+        - backend
+
 # *** THE FIX: Define the named volume at the top level ***
 volumes:
   redis-data:
