@@ -14,10 +14,13 @@ from datetime import datetime, timezone, date, timedelta
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from shared_state import redis_client, log_terminal
-from tasks import generate_preview_task, run_project_task, regenerate_content_task, regenerate_image_task
+# from tasks import generate_preview_task, run_project_task, regenerate_content_task, regenerate_image_task
+from tasks import generate_preview_task, run_project_task, regenerate_content_task, regenerate_image_task, PROCESSED_URLS_KEY
 from data_tasks import update_product_database_task
 from openai import OpenAI
 from phone_tasks import run_phone_scraper_task
+from playwright.async_api import async_playwright
+from urllib.parse import urljoin
 # from trending_post_tasks import generate_weekly_trending_post_task
 
 
@@ -34,6 +37,10 @@ app.add_middleware(
 openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # --- Pydantic Models ---
+class DiscoveredArticle(BaseModel):
+    source_url: str
+    title: str
+
 class ManualDraftPayload(BaseModel):
     topic: str
     keywords: str
@@ -52,6 +59,7 @@ class DashboardStats(BaseModel):
 class RunOptions(BaseModel):
     target_date: Optional[str] = None
     limit: Optional[int] = None
+    custom_url_list: Optional[List[str]] = None
 
 class ScrapeElementRule(BaseModel):
     name: str
@@ -65,10 +73,18 @@ class CrawlLevel(BaseModel):
 class ScrapeConfig(BaseModel):
     scrape_type: str
     initial_urls: List[str]
+    link_selector: Optional[str] = None # <-- ADD THIS LINE
     crawling_levels: Optional[List[CrawlLevel]] = None
     final_urls: Optional[List[str]] = None
     element_rules: List[ScrapeElementRule]
     modelUrls: Optional[List[str]] = None
+# class ScrapeConfig(BaseModel):
+#     scrape_type: str
+#     initial_urls: List[str]
+#     crawling_levels: Optional[List[CrawlLevel]] = None
+#     final_urls: Optional[List[str]] = None
+#     element_rules: List[ScrapeElementRule]
+#     modelUrls: Optional[List[str]] = None
 
 class Project(BaseModel):
     project_id: str = Field(default_factory=lambda: f"proj_{uuid.uuid4().hex[:10]}")
@@ -213,6 +229,55 @@ def get_or_create_term(name: str, term_type: str, base_url: str, auth_tuple: tup
         return None
 
 # Endpoints starts here...
+@app.post("/api/projects/{project_id}/discover-new-articles", response_model=List[DiscoveredArticle])
+async def discover_new_articles(project_id: str):
+    """
+    Performs a lightweight discovery of new, unprocessed articles for a project.
+    """
+    log_terminal(f"--- HIT: POST /api/projects/{project_id}/discover-new-articles ---")
+    
+    project_json = redis_client.get(f"project:{project_id}")
+    if not project_json:
+        raise HTTPException(status_code=404, detail="Project not found.")
+    
+    project_data = json.loads(project_json)
+    config = project_data.get('scrape_config', {})
+    source_url = config.get('initial_urls', [None])[0]
+    link_selector = config.get('link_selector')
+
+    if not all([source_url, link_selector]):
+        raise HTTPException(status_code=400, detail="Project is not configured for discovery.")
+
+    discovered_articles = []
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(args=["--no-sandbox"])
+        page = await browser.new_page()
+        try:
+            log_terminal(f"    - Discovering articles from: {source_url}")
+            await page.goto(source_url, wait_until='domcontentloaded', timeout=60000)
+            
+            parent_selector = " > ".join(link_selector.split(' > ')[:-1])
+            await page.wait_for_selector(parent_selector, timeout=30000)
+            
+            links = await page.locator(link_selector).all()
+            for link_locator in links:
+                href = await link_locator.get_attribute('href')
+                title = await link_locator.inner_text()
+
+                # --- THE FIX: Ignore irrelevant internal links ---
+                if href and title and href != '#':
+                    full_url = urljoin(source_url, href)
+                    if not redis_client.sismember(PROCESSED_URLS_KEY, full_url):
+                        discovered_articles.append({"source_url": full_url, "title": title})
+            
+            log_terminal(f"    - Discovery complete. Found {len(discovered_articles)} new articles.")
+            return discovered_articles
+        except Exception as e:
+            log_terminal(f"❌ DISCOVERY FAILED: {e}")
+            raise HTTPException(status_code=500, detail="Failed to discover new articles.")
+        finally:
+            await browser.close()
+
 @app.post("/api/drafts/manual", status_code=202)
 async def create_manual_draft(payload: ManualDraftPayload):
     """
@@ -470,11 +535,13 @@ async def run_project(project_id: str, options: RunOptions):
         run_phone_scraper_task.delay(job_id, project_data)
         log_terminal(f"🚀 Kicked off PHONE SCRAPER run for project '{project_data.get('project_name')}'. Job ID: {job_id}")
     else:
+        # --- THE FIX: Pass the custom_url_list to the Celery task ---
         run_project_task.delay(
             job_id,
             project_data,
             target_date=options.target_date,
-            limit=options.limit
+            limit=options.limit,
+            custom_url_list=options.custom_url_list
         )
         log_terminal(f"🚀 Kicked off standard run for project '{project_data.get('project_name')}'. Job ID: {job_id}")
 

@@ -1,65 +1,108 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { PlusCircle, Play, Edit, Trash2, Loader2, AlertTriangle, RefreshCw, X, Smartphone, Newspaper } from 'lucide-react';
-
-const apiClient = axios.create({
-  baseURL: `http://${window.location.hostname}:8000`,
-});
+import apiClient from '../apiClient'; // Make sure this import path is correct
 
 const RunWithOptionsModal = ({ project, onClose, onConfirm }) => {
   const today = new Date().toISOString().split('T')[0];
   const [targetDate, setTargetDate] = useState(today);
   const [limit, setLimit] = useState('');
+  
+  // --- NEW STATE for discovery ---
+  const [discoveredArticles, setDiscoveredArticles] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [selectedUrls, setSelectedUrls] = useState(new Set());
+
+  // Fetch new articles when the modal opens
+  useEffect(() => {
+    const discover = async () => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const response = await apiClient.post(`/api/projects/${project.project_id}/discover-new-articles`);
+        setDiscoveredArticles(response.data);
+      } catch (err) {
+        setError(err.response?.data?.detail || "Failed to discover new articles. Check the project configuration.");
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    discover();
+  }, [project.project_id]);
+
+  const handleCheckboxChange = (url) => {
+    setSelectedUrls(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(url)) {
+        newSet.delete(url);
+      } else {
+        newSet.add(url);
+      }
+      return newSet;
+    });
+  };
 
   const handleRun = () => {
     onConfirm(project.project_id, {
       target_date: targetDate,
       limit: limit ? parseInt(limit, 10) : null,
+      // Pass the selected URLs to the backend if any are selected
+      custom_url_list: selectedUrls.size > 0 ? Array.from(selectedUrls) : null,
     });
   };
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50">
-      <div className="bg-white rounded-lg shadow-2xl p-6 w-full max-w-md">
+      <div className="bg-white rounded-lg shadow-2xl p-6 w-full max-w-2xl">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-xl font-bold text-gray-800">Run Options for "{project.project_name}"</h2>
-          <button onClick={onClose} className="p-1 rounded-full hover:bg-gray-200">
-            <X className="w-6 h-6 text-gray-600" />
-          </button>
+          <button onClick={onClose}><X className="w-6 h-6" /></button>
         </div>
-        <div className="space-y-4">
+        
+        {/* --- Article Selection UI --- */}
+        <div className="mb-4 p-4 border rounded-lg">
+          <h3 className="font-semibold text-gray-700 mb-2">Select New Articles to Process</h3>
+          <p className="text-sm text-gray-500 mb-3">Leave all unchecked to run on all newly discovered articles, or select specific ones to process.</p>
+          {isLoading ? (
+            <div className="flex justify-center items-center h-48"><Loader2 className="animate-spin text-indigo-600" /></div>
+          ) : error ? (
+            <div className="text-red-500 text-center h-48 flex justify-center items-center">{error}</div>
+          ) : discoveredArticles.length === 0 ? (
+            <p className="text-gray-500 text-center h-48 flex justify-center items-center">No new articles found to process.</p>
+          ) : (
+            <div className="max-h-60 overflow-y-auto space-y-2 pr-2">
+              {discoveredArticles.map(article => (
+                <label key={article.source_url} className="flex items-center p-2 rounded-md hover:bg-gray-100 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={selectedUrls.has(article.source_url)}
+                    onChange={() => handleCheckboxChange(article.source_url)}
+                    className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <span className="ml-3 text-sm text-gray-800">{article.title}</span>
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label htmlFor="target-date" className="block text-sm font-medium text-gray-700 mb-1">
-              Target Date (for filtering)
-            </label>
-            <input
-              type="date"
-              id="target-date"
-              value={targetDate}
-              onChange={(e) => setTargetDate(e.target.value)}
-              className="w-full p-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
-            />
+            <label htmlFor="target-date" className="block text-sm font-medium text-gray-700 mb-1">Target Date</label>
+            <input type="date" id="target-date" value={targetDate} onChange={(e) => setTargetDate(e.target.value)} className="w-full p-2 border rounded-md"/>
           </div>
           <div>
-            <label htmlFor="limit" className="block text-sm font-medium text-gray-700 mb-1">
-              Number of Articles to Process
-            </label>
-            <input
-              type="number"
-              id="limit"
-              value={limit}
-              onChange={(e) => setLimit(e.target.value)}
-              placeholder="Leave blank for all"
-              className="w-full p-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
-            />
+            <label htmlFor="limit" className="block text-sm font-medium text-gray-700 mb-1">Article Limit</label>
+            <input type="number" id="limit" value={limit} onChange={(e) => setLimit(e.target.value)} placeholder="Leave blank for all" className="w-full p-2 border rounded-md"/>
           </div>
         </div>
+
         <div className="mt-6 flex justify-end space-x-3">
-          <button onClick={onClose} className="px-4 py-2 bg-gray-200 text-gray-800 font-semibold rounded-md hover:bg-gray-300">
-            Cancel
-          </button>
-          <button onClick={handleRun} className="px-6 py-2 bg-green-600 text-white font-semibold rounded-md shadow-sm hover:bg-green-700 flex items-center gap-2">
-            <Play className="w-5 h-5" /> Start Run
+          <button onClick={onClose} className="px-4 py-2 bg-gray-200 rounded-md">Cancel</button>
+          <button onClick={handleRun} className="px-6 py-2 bg-green-600 text-white rounded-md">
+            <Play className="w-5 h-5 inline mr-2" /> 
+            {selectedUrls.size > 0 ? `Start Run (${selectedUrls.size} Selected)` : 'Start Run (All New)'}
           </button>
         </div>
       </div>
@@ -95,13 +138,11 @@ const ProjectsView = ({ onCreateNew, onRunProject, onEditProject }) => {
     fetchProjects();
   }, []);
 
-  // --- NEW: Delete handler function ---
   const handleDeleteProject = async (projectId, projectName) => {
     if (window.confirm(`Are you sure you want to delete the project "${projectName}"? This action cannot be undone.`)) {
         setDeletingId(projectId);
         try {
             await apiClient.delete(`/api/projects/${projectId}`);
-            // Refresh the project list on success
             fetchProjects();
         } catch (err) {
             alert(`Failed to delete project: ${err.response?.data?.detail || 'Unknown error'}`);
@@ -113,13 +154,11 @@ const ProjectsView = ({ onCreateNew, onRunProject, onEditProject }) => {
   };
 
   const handleRunClick = (project) => {
-    // If it's a phone scraper, run immediately.
     if (project.project_type === 'phone_spec_scraper') {
       if (window.confirm(`Are you sure you want to run the scraper "${project.project_name}"?`)) {
-        onRunProject(project.project_id, {}); // Pass empty options
+        onRunProject(project.project_id, {});
       }
     } else {
-      // Otherwise, open the options modal for standard articles.
       setProjectToRun(project);
       setIsModalOpen(true);
     }
@@ -234,7 +273,6 @@ const ProjectsView = ({ onCreateNew, onRunProject, onEditProject }) => {
                 <div className="flex items-center space-x-2">
                   <button onClick={() => onEditProject(project)} className="p-2 text-gray-500 hover:text-indigo-600 hover:bg-gray-100 rounded-full"><Edit className="w-4 h-4" /></button>
                   
-                  {/* --- MODIFIED DELETE BUTTON --- */}
                   <button 
                     onClick={() => handleDeleteProject(project.project_id, project.project_name)}
                     disabled={deletingId === project.project_id}
@@ -246,8 +284,6 @@ const ProjectsView = ({ onCreateNew, onRunProject, onEditProject }) => {
                         <Trash2 className="w-4 h-4" />
                     )}
                   </button>
-                  {/* --- END MODIFICATION --- */}
-
                 </div>
               </div>
             </div>

@@ -1,3 +1,4 @@
+from typing import List, Optional, Dict, Any
 from google_client import get_gsc_service
 from datetime import date, timedelta
 import os
@@ -336,19 +337,14 @@ def generate_preview_task(job_id: str, url: str, project_type: str = 'standard_a
             browser.close()
 
 @celery_app.task(bind=True)
-def run_project_task(self, job_id: str, project_data: dict, target_date: str = None, limit: int = None):
-    # --- LOGGING ---
+def run_project_task(self, job_id: str, project_data: dict, target_date: str = None, limit: int = None, custom_url_list: Optional[List[str]] = None):
     log_terminal(f"--- [RUNNER] Starting job {job_id} for project: {project_data.get('project_name')} ---")
-    try:
-        pretty_project_data = json.dumps(project_data, indent=2)
-        log_terminal(f"    - Full project data received:\n{pretty_project_data}")
-    except Exception:
-        log_terminal(f"    - Full project data received: {project_data}")
+    if custom_url_list:
+        log_terminal(f"    - Processing {len(custom_url_list)} custom-selected URLs.")
     if target_date:
         log_terminal(f"    - Target date override: {target_date}")
     if limit:
-        log_terminal(f"    - Article limit: {limit}")
-    # --- END LOGGING ---
+        log_terminal(f"    - Article limit override: {limit}")
 
     with sync_playwright() as p:
         browser = p.chromium.launch(args=["--no-sandbox"])
@@ -359,94 +355,104 @@ def run_project_task(self, job_id: str, project_data: dict, target_date: str = N
             job_status_json = redis_client.get(f"job:{job_id}")
             if not job_status_json: return
             job_status = json.loads(job_status_json)
-            job_status['status'] = 'scraping'
-            redis_client.set(f"job:{job_id}", json.dumps(job_status))
             
             config = project_data.get('scrape_config', {})
-            
-            # --- THE FIX: The wizard already provides the final list of article URLs. ---
-            # We no longer need to search for them. We will process `initial_urls` directly.
-            article_links_from_config = config.get('initial_urls', [])
-            log_terminal(f"    - Received {len(article_links_from_config)} article URLs from the project config.")
-            
-            # Create the list of items to process, ensuring each is a dictionary
-            article_links = [{"source_url": url} for url in article_links_from_config]
+            article_links = []
 
-            if limit and limit > 0:
-                article_links = article_links[:limit]
-            
-            log_terminal(f"    - After applying limit, processing {len(article_links)} articles.")
-            # --- END FIX ---
+            if custom_url_list:
+                # --- A. Use the user-provided list ---
+                article_links = [{"source_url": url} for url in custom_url_list]
+                log_terminal("    - Skipping discovery, using custom URL list.")
+            else:
+                # --- B. Perform dynamic discovery as before ---
+                job_status['status'] = 'discovering'
+                redis_client.set(f"job:{job_id}", json.dumps(job_status))
+                source_url = config.get('initial_urls', [None])[0]
+                link_selector = config.get('link_selector')
 
-            job_status['total_urls'] = len(article_links)
+                if not source_url or not link_selector:
+                    raise ValueError("Project is not configured for dynamic discovery.")
+
+                log_terminal(f"    - Navigating to source page for discovery: {source_url}")
+                page.goto(source_url, wait_until='domcontentloaded', timeout=60000)
+                parent_selector = " > ".join(link_selector.split(' > ')[:-1])
+                page.wait_for_selector(parent_selector, timeout=30000)
+                
+                links = page.locator(link_selector).all()
+                for link_locator in links:
+                    href = link_locator.get_attribute('href')
+                    if href:
+                        full_url = urljoin(source_url, href)
+                        if not any(d.get('source_url') == full_url for d in article_links):
+                            article_links.append({"source_url": full_url})
+                log_terminal(f"    - Discovery complete. Found {len(article_links)} unique URLs.")
+            
+            job_status['status'] = 'processing'
             redis_client.set(f"job:{job_id}", json.dumps(job_status))
             
-            articles_to_process_count = 0
-            if not article_links:
-                 log_terminal(f"    - No articles found in config. Nothing to process.")
+            # --- VALIDATION AND PROCESSING PHASE (Now common for both paths) ---
+            articles_to_generate = []
             
-            for item in article_links:
+            new_articles = [item for item in article_links if not redis_client.sismember(PROCESSED_URLS_KEY, item['source_url'])]
+            log_terminal(f"    - Found {len(new_articles)} new articles not processed in previous runs.")
+
+            if limit:
+                new_articles = new_articles[:limit]
+            
+            job_status['total_urls'] = len(new_articles)
+            redis_client.set(f"job:{job_id}", json.dumps(job_status))
+
+            for item in new_articles:
                 source_url = item['source_url']
-                if redis_client.sismember(PROCESSED_URLS_KEY, source_url):
-                    log_terminal(f"    - Skipping duplicate URL (already processed in a past run): {source_url}")
-                    job_status_json = redis_client.get(f"job:{job_id}")
-                    if job_status_json:
-                        job_status = json.loads(job_status_json)
-                        job_status['processed_urls'] += 1
-                        redis_client.set(f"job:{job_id}", json.dumps(job_status))
-                    continue
-                
-                log_terminal(f"    - Now processing: {source_url}") # Added log for clarity
                 page.goto(source_url, wait_until='domcontentloaded', timeout=60000)
-
-                for rule in config.get('element_rules', []):
-                    try:
-                        page.locator(rule['selector']).first.wait_for(timeout=10000) # Increased timeout for stability
-                        if rule['name'] == 'article_html':
-                            item[rule['name']] = page.locator(rule['selector']).first.inner_html()
-                        else:
-                            item[rule['name']] = page.locator(rule['selector']).first.inner_text()
-                    except Exception:
-                        item[rule['name']] = None
+                date_rule = next((rule for rule in config.get('element_rules', []) if rule['name'] == 'date'), None)
                 
-                # --- DATE VALIDATION LOGIC ---
-                # This part now becomes the main filter.
-                should_process = True # Assume we process unless a date filter proves otherwise
-                date_str = item.get('date')
-
-                if date_str and target_date: # Only filter if both a date and a target are present
-                    article_dt = dateparser.parse(date_str)
-                    if article_dt:
-                        filter_date = datetime.strptime(target_date, '%Y-%m-%d').date()
-                        if article_dt.date() != filter_date:
-                            should_process = False
-                            log_terminal(f"    - Skipping article, date {article_dt.date()} does not match target {filter_date}")
-                    else:
-                        log_terminal(f"    - Could not parse date '{date_str}', will process anyway.")
-                # --- END DATE VALIDATION ---
-                
-                if not should_process:
-                    job_status_json = redis_client.get(f"job:{job_id}")
-                    if job_status_json:
-                        job_status = json.loads(job_status_json)
-                        job_status['processed_urls'] += 1
-                        redis_client.set(f"job:{job_id}", json.dumps(job_status))
+                if not date_rule or not target_date:
+                    articles_to_generate.append(item)
                     continue
+
+                try:
+                    date_str = page.locator(date_rule['selector']).first.inner_text(timeout=5000)
+                    item['date'] = date_str
+                    
+                    article_dt = dateparser.parse(date_str, settings={'PREFER_DATES_FROM': 'past'})
+                    target_dt = datetime.strptime(target_date, '%Y-%m-%d').date()
+                    
+                    if article_dt and article_dt.date() <= target_dt:
+                        articles_to_generate.append(item)
+                    else:
+                        log_terminal(f"    - Skipping: Article date {article_dt.date()} is outside the target range.")
+                except Exception as e:
+                    log_terminal(f"    - Could not find or parse date for {source_url}, skipping. Error: {e}")
+
+            log_terminal(f"    - Validation complete. {len(articles_to_generate)} articles will be generated.")
+            
+            job_status['processed_urls'] = len(new_articles) - len(articles_to_generate)
+            job_status['total_urls'] = len(new_articles)
+            redis_client.set(f"job:{job_id}", json.dumps(job_status))
+            
+            for item in articles_to_generate:
+                source_url = item['source_url']
+                page.goto(source_url, wait_until='domcontentloaded', timeout=60000)
+                for rule in config.get('element_rules', []):
+                    if rule['name'] != 'date':
+                        try:
+                            item[rule['name']] = page.locator(rule['selector']).first.inner_html() if rule['name'] == 'article_html' else page.locator(rule['selector']).first.inner_text()
+                        except Exception:
+                            item[rule['name']] = None
                 
-                articles_to_process_count += 1
                 generate_content_from_template_task.delay(job_id, item, project_data['llm_prompt_template'])
             
-            if articles_to_process_count == 0:
-                final_job_status_json = redis_client.get(f"job:{job_id}")
-                if final_job_status_json:
-                    final_job_status = json.loads(final_job_status_json)
-                    final_job_status['status'] = 'complete'
-                    final_job_status['processed_urls'] = final_job_status.get('total_urls', 0)
-                    redis_client.set(f"job:{job_id}", json.dumps(final_job_status))
-                    log_terminal(f"🎉 Job {job_id} finished. No new articles were found to process.")
+            if not articles_to_generate:
+                job_status['status'] = 'complete'
+                redis_client.set(f"job:{job_id}", json.dumps(job_status))
+                log_terminal(f"🎉 Job {job_id} finished. No new articles were found to process.")
 
         except Exception as e:
-            log_terminal(f"❌ Critical error during scraping phase for job {job_id}: {e}")
+            log_terminal(f"❌ Critical error during run for job {job_id}: {e}")
+            job_status['status'] = 'failed'
+            job_status['error'] = str(e)
+            redis_client.set(f"job:{job_id}", json.dumps(job_status))
         finally:
             page.close()
             context.close()
