@@ -17,6 +17,8 @@ from shared_state import redis_client, log_terminal, log_action
 from celery.signals import worker_process_init
 from urllib.parse import urljoin
 import time
+from celery import Celery
+from celery.exceptions import Ignore
 
 
 from celery_app import app as celery_app
@@ -1063,3 +1065,92 @@ def fetch_gsc_insights_task(self):
         log_terminal(f"❌ GSC INSIGHTS ERROR: Failed to fetch or cache GSC insights. Error: {e}")
 
     log_terminal("--- [GSC INSIGHTS TASK] Weekly data fetch complete ---")
+
+@celery_app.task(
+    bind=True,
+    autoretry_for=(requests.exceptions.RequestException,), # Automatically retry on network errors
+    retry_kwargs={'max_retries': 3}, # Try a maximum of 3 times
+    retry_backoff=True, # Enable exponential backoff (e.g., wait 1, 2, 4 mins)
+    retry_backoff_max=600 # Wait a maximum of 10 minutes between retries
+)
+def inspect_wordpress_task(self, job_id: str, credentials: dict):
+    """
+    Connects to a WordPress site and extracts a full map of its content structure.
+    """
+    job_key = f"job:{job_id}"
+    result_key = f"inspection_result:{job_id}"
+    
+    def update_job_status(status: str, progress: int = None, message: str = None):
+        try:
+            job_status = json.loads(redis_client.get(job_key) or '{}')
+            job_status['status'] = status
+            if progress is not None:
+                job_status['progress'] = progress
+            if message:
+                job_status['message'] = message
+            redis_client.set(job_key, json.dumps(job_status))
+        except Exception as e:
+            log_terminal(f"Error updating job status for {job_id}: {e}")
+
+    log_terminal(f"--- [INSPECTOR TASK] Starting job {job_id} ---")
+    update_job_status("processing", 5, "Initializing...")
+
+    try:
+        wp_url = credentials['url'].rstrip('/')
+        auth_tuple = (credentials['username'], credentials['password'])
+        headers = {'User-Agent': 'ContentPipelineInspector/1.0'}
+        
+        update_job_status("processing", 10, "Fetching categories...")
+        categories_response = requests.get(f"{wp_url}/wp-json/wp/v2/categories?per_page=100", headers=headers, auth=auth_tuple, timeout=20)
+        categories_response.raise_for_status()
+        category_map = {cat['id']: cat['name'] for cat in categories_response.json()}
+        log_terminal(f"    - Found {len(category_map)} categories.")
+        time.sleep(1)
+
+        full_content_list = []
+        total_items = 0
+
+        for post_type in ['posts', 'pages']:
+            page = 1
+            while True:
+                update_job_status("processing", 20 + (page * 5), f"Fetching {post_type} (page {page})...")
+                url = f"{wp_url}/wp-json/wp/v2/{post_type}?per_page=100&page={page}&status=publish&context=view"
+                response = requests.get(url, headers=headers, auth=auth_tuple, timeout=30)
+                
+                if response.status_code == 400 and "rest_post_invalid_page_number" in response.text:
+                    log_terminal(f"    - Reached the end of {post_type}.")
+                    break
+
+                response.raise_for_status()
+                content_batch = response.json()
+                if not content_batch:
+                    break
+                
+                for item in content_batch:
+                    full_content_list.append({
+                        "Title": item['title']['rendered'], "URL": item['link'], "Type": item['type'],
+                        "Category": category_map.get(item['categories'][0], 'N/A') if item.get('categories') else 'Page'
+                    })
+                
+                total_items += len(content_batch)
+                log_terminal(f"    - Fetched {len(content_batch)} {post_type}. Total: {total_items}")
+                page += 1
+                time.sleep(1)
+
+        update_job_status("complete", 100, f"Inspection complete. Found {total_items} items.")
+        redis_client.set(result_key, json.dumps(full_content_list), ex=3600)
+        log_terminal(f"✅ [INSPECTOR TASK] Job {job_id} complete.")
+
+    except requests.exceptions.HTTPError as e:
+        # Handle specific HTTP errors like 401 Unauthorized (bad password)
+        if e.response.status_code == 401:
+            log_terminal(f"❌ [INSPECTOR TASK] FAILED for job {job_id}: Authentication failed (401). Please check credentials.")
+            update_job_status("failed", error="Authentication failed. Please check your username and application password.")
+            raise Ignore() # Do not retry on auth failure
+        # For other HTTP errors, let Celery's autoretry handle it.
+        raise self.retry(exc=e)
+    except Exception as e:
+        log_terminal(f"❌ [INSPECTOR TASK] FAILED for job {job_id}. Error: {e}")
+        update_job_status("failed", error=str(e))
+        # Use self.retry to trigger Celery's retry mechanism for unexpected errors
+        raise self.retry(exc=e)

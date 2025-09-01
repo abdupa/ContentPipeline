@@ -1,10 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { Loader2, CheckCircle, XCircle, FileDown, Info, CheckSquare } from 'lucide-react';
-
-const apiClient = axios.create({
-  baseURL: `http://${window.location.hostname}:8000`,
-});
+import { Loader2, CheckCircle, XCircle, FileDown, Info, CheckSquare, Download } from 'lucide-react';
+import apiClient from '../apiClient'; // Ensure this path is correct for your project structure
 
 const JobStatusView = ({ jobId, onReset, onNavigateToQueue }) => {
   const [jobData, setJobData] = useState(null);
@@ -38,45 +35,24 @@ const JobStatusView = ({ jobId, onReset, onNavigateToQueue }) => {
     };
   }, [jobId]);
 
+  // --- CORRECTED: Only one handleDownloadCsv function ---
   const handleDownloadCsv = () => {
-    if (!jobData || !jobData.results || jobData.results.length === 0) return;
-    
-    const now = new Date();
-    const fileTimestamp = now.toLocaleString('sv').replace(/ /g, '_').replace(/:/g, '-');
-
-    const results = jobData.results;
-    const headers = Object.keys(results[0]);
-    let csvContent = headers.join(',') + '\n';
-
-    results.forEach(row => {
-      const rowValues = headers.map(header => {
-        let value = row[header] ? `"${row[header].toString().replace(/"/g, '""')}"` : '';
-        return value;
-      });
-      csvContent += rowValues.join(',') + '\n';
-    });
-
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', `job_results_${fileTimestamp}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    // This function now correctly points to the new, dynamic download endpoint for inspection results.
+    // For scraper results, we would need a different mechanism if we wanted to keep both.
+    // For now, this will serve the primary purpose for the Tools section.
+    window.open(`${apiClient.defaults.baseURL}/api/tools/download-inspection-result/${jobId}`);
   };
 
   const renderResultsTable = () => {
     const hasResults = jobData && jobData.results && jobData.results.length > 0;
     
-    if (!hasResults) {
-      // *** THE FIX: Check job status before showing the message ***
+    if (!hasResults || (jobData.results[0] && jobData.results[0].draft_id)) {
+      // Don't render a table for manual generation jobs or if there are no results.
       if (jobData && jobData.status === 'complete') {
         return (
           <div className="text-center py-8 text-gray-600 bg-gray-50 rounded-lg">
             <Info className="w-8 h-8 mx-auto mb-2 text-blue-500" />
-            <p className="font-semibold">No new articles were processed.</p>
-            <p className="text-sm">This can happen if all discovered articles were filtered by date or were already processed in a previous run.</p>
+            <p className="font-semibold">No new articles were processed for this run.</p>
           </div>
         );
       }
@@ -104,7 +80,7 @@ const JobStatusView = ({ jobId, onReset, onNavigateToQueue }) => {
                 <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-gray-600">{index + 1}</td>
                 {headers.map(header => (
                   <td key={`${index}-${header}`} className="px-4 py-3 whitespace-nowrap text-sm text-gray-700">
-                    {header === 'scraped_at' ? new Date(row[header]).toLocaleString() : row[header]}
+                    {row[header]}
                   </td>
                 ))}
               </tr>
@@ -124,17 +100,17 @@ const JobStatusView = ({ jobId, onReset, onNavigateToQueue }) => {
     <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-5xl border border-gray-200">
       <div className="flex justify-between items-start mb-6">
         <div>
-          <h2 className="text-2xl font-bold text-gray-800">{jobData.project_name || "Scraping Job Status"}</h2>
+          <h2 className="text-2xl font-bold text-gray-800">{jobData.project_name || jobData.job_id.includes('inspect') ? 'Site Inspection' : "Job Status"}</h2>
           <p className="text-sm text-gray-500 font-mono">ID: {jobId}</p>
         </div>
-        <button onClick={onReset} className="px-4 py-2 bg-gray-200 text-gray-800 font-semibold rounded-md hover:bg-gray-300">Back to Projects</button>
+        <button onClick={onReset} className="px-4 py-2 bg-gray-200 text-gray-800 font-semibold rounded-md hover:bg-gray-300">Back</button>
       </div>
 
-      {['processing', 'scraping', 'starting'].includes(jobData.status) ? (
+      {['processing', 'discovering', 'scraping', 'starting'].includes(jobData.status) ? (
          <div className="mb-6">
           <div className="flex justify-between items-center mb-1">
             <span className="text-lg font-semibold text-indigo-600 flex items-center"><Loader2 className="animate-spin mr-2" /> {jobData.status.charAt(0).toUpperCase() + jobData.status.slice(1)}...</span>
-            <span className="text-lg font-semibold text-gray-700">{jobData.processed_urls} / {jobData.total_urls || '?'}</span>
+            <span className="text-lg font-semibold text-gray-700">{jobData.processed_urls || 0} / {jobData.total_urls || '?'}</span>
           </div>
           <div className="w-full bg-gray-200 rounded-full h-4">
             <div className="bg-indigo-600 h-4 rounded-full transition-all duration-500" style={{ width: `${progressPercent}%` }}></div>
@@ -142,33 +118,29 @@ const JobStatusView = ({ jobId, onReset, onNavigateToQueue }) => {
         </div>
       ) : null}
 
+      {/* --- CORRECTED JSX and LOGIC for complete status --- */}
       {jobData.status === 'complete' && (
         <div className="mb-6 p-4 bg-green-50 text-green-700 rounded-lg flex items-center justify-between">
             <div className="flex items-center">
                 <CheckCircle className="mr-3" />
-                <span className="text-lg font-semibold">
-                  {/* Differentiate between scraper and manual job completion */}
-                  {jobData.results && jobData.results.length === 1 && jobData.results[0].draft_id 
-                    ? `Successfully generated 1 new draft.`
-                    : `Job Complete! Processed ${jobData.total_urls || 0} items and generated ${jobData.results?.length || 0} new drafts.`
-                  }
-                </span>
+                <span className="text-lg font-semibold">Job Complete!</span>
             </div>
-
-            {/* --- NEW LOGIC: Show appropriate button based on job result --- */}
-            {jobData.results && jobData.results.length > 0 ? (
-                jobData.results[0].draft_id ? ( // This is a manual job result
-                    <button onClick={onNavigateToQueue} className="px-4 py-2 bg-green-600 text-white font-semibold rounded-md hover:bg-green-700 flex items-center gap-2">
-                        <CheckSquare className="w-5 h-5"/>
-                        View Draft in Approval Queue
-                    </button>
-                ) : ( // This is a scraper job result
-                    <button onClick={handleDownloadCsv} className="px-4 py-2 bg-green-600 text-white font-semibold rounded-md hover:bg-green-700 flex items-center gap-2">
-                        <FileDown className="w-5 h-5"/>
-                        Download CSV
-                    </button>
-                )
-            ) : null}
+            
+            {/* Logic to show the correct button */}
+            {jobId.includes('inspect') ? (
+                <button onClick={handleDownloadCsv} className="px-4 py-2 bg-blue-600 text-white font-semibold rounded-md hover:bg-blue-700 flex items-center gap-2">
+                    <Download className="w-5 h-5"/> Download Inspection CSV
+                </button>
+            ) : jobId.includes('manual') ? (
+                <button onClick={onNavigateToQueue} className="px-4 py-2 bg-green-600 text-white font-semibold rounded-md hover:bg-green-700 flex items-center gap-2">
+                    <CheckSquare className="w-5 h-5"/> View Draft in Approval Queue
+                </button>
+            ) : (
+                // This can be a placeholder or a different action for scraper jobs
+                 <button onClick={onNavigateToQueue} className="px-4 py-2 bg-green-600 text-white font-semibold rounded-md hover:bg-green-700 flex items-center gap-2">
+                    <CheckSquare className="w-5 h-5"/> View Generated Drafts
+                </button>
+            )}
         </div>
       )}
       
@@ -179,7 +151,7 @@ const JobStatusView = ({ jobId, onReset, onNavigateToQueue }) => {
         </div>
       )}
       
-      {renderResultsTable()}
+      {jobData.project_name && renderResultsTable()}
     </div>
   );
 };

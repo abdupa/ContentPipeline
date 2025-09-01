@@ -29,7 +29,8 @@ beat_schedule = {
     },
     'fetch-gsc-data-daily': {
         'task': 'tasks.fetch_gsc_data_task',
-        'schedule': crontab(hour=22, minute=0), # Runs at 02:00 AM PST
+        'schedule': crontab(hour=3, minute=50), # Runs at 11:50 AM PST
+        # hour=3, minute=50
     },
     'fetch-gsc-insights-weekly': {
         'task': 'tasks.fetch_gsc_insights_task',

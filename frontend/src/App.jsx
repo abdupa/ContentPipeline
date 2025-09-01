@@ -15,6 +15,7 @@ import ManualEditorView from './components/ManualEditorView.jsx';
 import SettingsView from './components/SettingsView.jsx';
 import PerformanceView from './components/PerformanceView.jsx';
 import InsightsView from './components/InsightsView.jsx';
+import ToolsView from './components/ToolsView.jsx';
 
 
 const App = () => {
@@ -45,8 +46,15 @@ const App = () => {
     else if (itemName === 'Approval Queue') setCurrentView('approvalQueue');
     else if (itemName === 'Published Posts') setCurrentView('publishedPosts'); // <-- NEW
     else if (itemName === 'Action History') setCurrentView('actionHistory');
+    else if (itemName === 'Tools') setCurrentView('tools');
     else if (itemName === 'Settings') setCurrentView('settings');
     else alert(`Navigating to: ${itemName}`);
+  };
+
+  const onJobStarted = (jobId, originView = 'projects') => {
+    setActiveScrapeJobId(jobId);
+    localStorage.setItem('jobOriginView', originView);
+    setCurrentView('scrapeJobStatus');
   };
 
   const onManualJobStarted = (jobId) => {
@@ -94,6 +102,7 @@ const App = () => {
     if (currentView === 'allPosts') return 'Content Library';
     if (currentView === 'publishedPosts') return 'Published Posts'; // <-- NEW
     if (currentView === 'actionHistory') return 'Action History';
+    if (currentView === 'tools') return 'Tools';
     if (currentView === 'settings') return 'Settings';
     return 'Dashboard';
   };
@@ -118,10 +127,14 @@ const App = () => {
                   onProjectSaved={() => { setProjectToEdit(null); setCurrentView('projects'); }} 
                 />;
       case 'scrapeJobStatus':
-        return <JobStatusView jobId={activeScrapeJobId} onReset={() => setCurrentView('projects')} />;
-      case 'manualEditor': // <-- NEW
+        return <JobStatusView 
+                 jobId={activeScrapeJobId} 
+                 onReset={(origin) => setCurrentView(localStorage.getItem('jobOriginView') || 'projects')} 
+                 onNavigateToQueue={() => setCurrentView('approvalQueue')} 
+               />;
+      case 'manualEditor':
         return <ManualEditorView onJobStarted={onManualJobStarted} />;
-      case 'publishedPosts': // <-- NEW
+      case 'publishedPosts':
         return <PublishedPostsView onEditDraft={handleEditDraft} />;
       case 'allPosts':
         return <AllPostsView onEditDraft={handleEditDraft} />;
@@ -129,7 +142,9 @@ const App = () => {
         return <ApprovalQueueView onEditDraft={handleEditDraft} />;
       case 'actionHistory':
         return <ActionHistoryView />;
-      case 'settings': // <-- ADD THIS
+      case 'tools':
+        return <ToolsView onJobStarted={onJobStarted} />;
+      case 'settings':
         return <SettingsView />;
       case 'contentEditor':
         return <ContentEditorView draftId={draftToEditId} onBack={() => setCurrentView('approvalQueue')} />;

@@ -11,7 +11,7 @@ import time
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 from datetime import datetime, timezone, date, timedelta
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from shared_state import redis_client, log_terminal
 # from tasks import generate_preview_task, run_project_task, regenerate_content_task, regenerate_image_task
@@ -21,7 +21,8 @@ from openai import OpenAI
 from phone_tasks import run_phone_scraper_task
 from playwright.async_api import async_playwright
 from urllib.parse import urljoin
-# from trending_post_tasks import generate_weekly_trending_post_task
+import csv
+from io import StringIO
 
 
 
@@ -37,6 +38,14 @@ app.add_middleware(
 openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # --- Pydantic Models ---
+class WordPressInspectPayload(BaseModel):
+    url: str
+    username: str
+    password: str
+
+class JobCreationResponse(BaseModel):
+    job_id: str
+
 class DiscoveredArticle(BaseModel):
     source_url: str
     title: str
@@ -78,13 +87,6 @@ class ScrapeConfig(BaseModel):
     final_urls: Optional[List[str]] = None
     element_rules: List[ScrapeElementRule]
     modelUrls: Optional[List[str]] = None
-# class ScrapeConfig(BaseModel):
-#     scrape_type: str
-#     initial_urls: List[str]
-#     crawling_levels: Optional[List[CrawlLevel]] = None
-#     final_urls: Optional[List[str]] = None
-#     element_rules: List[ScrapeElementRule]
-#     modelUrls: Optional[List[str]] = None
 
 class Project(BaseModel):
     project_id: str = Field(default_factory=lambda: f"proj_{uuid.uuid4().hex[:10]}")
@@ -1069,3 +1071,71 @@ async def trigger_gsc_insights_fetch():
     except Exception as e:
         log_terminal(f"❌ ERROR triggering GSC insights task: {e}")
         raise HTTPException(status_code=500, detail="Failed to queue the GSC insights fetch task.")
+
+# --- NEW: Tools Endpoints ---
+
+@app.post("/api/tools/inspect-wordpress", response_model=JobCreationResponse)
+async def inspect_wordpress_site(payload: WordPressInspectPayload):
+    """
+    Kicks off a background task to inspect a WordPress site's structure.
+    """
+    log_terminal("--- HIT: POST /api/tools/inspect-wordpress ---")
+    try:
+        from tasks import inspect_wordpress_task
+        
+        job_id = f"inspect_{uuid.uuid4().hex[:10]}"
+        job_status = {
+            "job_id": job_id,
+            "status": "starting",
+            "progress": 0,
+            "result_key": f"inspection_result:{job_id}" # Key for storing the result
+        }
+        redis_client.set(f"job:{job_id}", json.dumps(job_status), ex=3600)
+
+        inspect_wordpress_task.delay(job_id, payload.dict())
+        
+        log_terminal(f"✅ Queued WordPress inspection for {payload.url}. Job ID: {job_id}")
+        return {"job_id": job_id}
+    except Exception as e:
+        log_terminal(f"❌ ERROR queuing WordPress inspection: {e}")
+        raise HTTPException(status_code=500, detail="Failed to queue the inspection task.")
+
+@app.get("/api/tools/download-inspection-result/{job_id}")
+async def download_inspection_result(job_id: str):
+    """
+    Converts the JSON result of an inspection to CSV and serves it for download.
+    """
+    log_terminal(f"--- HIT: GET /api/tools/download-inspection-result/{job_id} ---")
+    result_key = f"inspection_result:{job_id}"
+    result_json = redis_client.get(result_key)
+
+    if not result_json:
+        raise HTTPException(status_code=404, detail="Inspection result not found or expired.")
+
+    data = json.loads(result_json)
+    if not data:
+        raise HTTPException(status_code=404, detail="Result data is empty.")
+    
+    # --- THE FIX: Explicitly handle headers and empty values ---
+    
+    # 1. Define a fixed set of headers to ensure consistency.
+    fieldnames = ["Title", "URL", "Type", "Category"]
+    
+    # 2. Prepare the data, replacing any missing or empty values with "N/A".
+    cleaned_data = []
+    for row in data:
+        cleaned_row = {field: row.get(field) or "N/A" for field in fieldnames}
+        cleaned_data.append(cleaned_row)
+        
+    output = StringIO()
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
+    writer.writeheader()
+    writer.writerows(cleaned_data)
+    
+    csv_data = output.getvalue()
+    
+    return Response(
+        content=csv_data,
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=wordpress_inspection_{job_id}.csv"}
+    )
