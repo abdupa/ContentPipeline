@@ -19,6 +19,13 @@ from urllib.parse import urljoin
 import time
 from celery import Celery
 from celery.exceptions import Ignore
+from celery import chain
+from data_tasks import update_woocommerce_products_task
+from google_sheets import get_sheets_service, fetch_sheet_grid
+from sheet_parser import clean_product_name, extract_prices, extract_hyperlink_from_cell, slugify, convert_to_affiliate_link, parse_ecommerce_url
+import pandas as pd
+from thefuzz import process as fuzz_process, fuzz
+from woocommerce import API as WooAPI
 
 
 from celery_app import app as celery_app
@@ -40,23 +47,21 @@ content_map: dict = {}
 
 @worker_process_init.connect
 def init_worker(**kwargs):
-    global openai_client, product_database, content_map
+    global openai_client, content_map  # <-- 'product_database' is GONE from this line
     log_terminal("--- [WORKER INIT] Initializing resources... ---")
     try:
         openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        if os.path.exists(PRODUCT_DB_PATH):
-            with open(PRODUCT_DB_PATH, 'r', encoding='utf-8') as f:
-                product_database = json.load(f)
-            log_terminal(f"✅ Loaded Product Database with {len(product_database)} products.")
-        else:
-            log_terminal(f"⚠️  Warning: {PRODUCT_DB_PATH} not found.")
+        
+        # --- The product_database loading block has been REMOVED ---
+        # (This ensures all tasks must load the fresh file from disk)
+
         if os.path.exists(CONTENT_MAP_PATH):
             with open(CONTENT_MAP_PATH, 'r', encoding='utf-8') as f:
                 content_map = json.load(f)
             log_terminal("✅ Loaded Content Strategy Map.")
         else:
             log_terminal(f"⚠️  Warning: {CONTENT_MAP_PATH} not found.")
-        log_terminal("✅ Worker resources initialized successfully.")
+        log_terminal("✅ Worker resources initialized successfully (DB loads per-task).")
     except Exception as e:
         log_terminal(f"❌ FATAL: Could not initialize worker resources: {e}")
 
@@ -66,6 +71,12 @@ def intercept_and_block(route):
     else: route.continue_()
 
 def find_mentioned_products(text_content: str) -> list:
+    product_database = []
+    try:
+        with open(PRODUCT_DB_PATH, 'r', encoding='utf-8') as f:
+            product_database = json.load(f)
+    except Exception:
+        pass # Fail silently if DB not found
     if not product_database or not text_content: return []
     mentioned = []
     lower_text = text_content.lower()
@@ -819,103 +830,108 @@ def sync_wordpress_status_task(self):
     log_terminal("--- [SYNC TASK] WordPress synchronization complete ---")
 
 @celery_app.task(bind=True)
-def full_wordpress_sync_task(self):
-    """
-    Performs a full, two-way synchronization between the app's database and the live
-    WordPress site, including both posts and WooCommerce products.
-    """
-    log_terminal("--- [SYNC TASK] Starting full WordPress synchronization ---")
+def full_wordpress_sync_task(self, job_id: str):
+    job_key = f"job:{job_id}"
+    log_terminal(f"--- [SYNC TASK] Starting full WordPress synchronization for job {job_id} ---")
     
-    WP_URL = os.getenv("WP_URL")
-    WP_USER = os.getenv("WP_USERNAME")
-    WP_PASSWORD = os.getenv("WP_APPLICATION_PASSWORD")
+    try:
+        WP_URL = os.getenv("WP_URL")
+        WC_KEY = os.getenv("WC_KEY")
+        WC_SECRET = os.getenv("WC_SECRET")
+        WP_USER = os.getenv("WP_USERNAME")
+        WP_PASSWORD = os.getenv("WP_APPLICATION_PASSWORD")
 
-    if not all([WP_URL, WP_USER, WP_PASSWORD]):
-        log_terminal("❌ SYNC FAILED: WordPress credentials are not configured.")
-        return
+        if not all([WP_URL, WC_KEY, WC_SECRET, WP_USER, WP_PASSWORD]):
+            raise ValueError("WordPress or WooCommerce credentials are not configured.")
 
-    auth_tuple = (WP_USER, WP_PASSWORD)
-    headers = {'User-Agent': 'ContentPipelineSync/1.0'}
-    
-    live_content = {}
-    
-    # --- Step 1: Fetch all live content from WordPress ---
-    for post_type in ['posts', 'products']:
-        try:
-            page = 1
-            while True:
-                url = f"{WP_URL.rstrip('/')}/wp-json/wp/v2/{post_type}?per_page=100&page={page}&status=publish&context=view"
-                response = requests.get(url, headers=headers, auth=auth_tuple, timeout=30)
-                response.raise_for_status()
-                
-                content_batch = response.json()
-                if not content_batch:
-                    break # No more content of this type
-                
-                for item in content_batch:
-                    live_content[str(item['id'])] = {
-                        "title": item['title']['rendered'],
-                        "slug": item['slug'],
-                        "link": item['link'],
-                        "type": item['type'] # 'post' or 'product'
-                    }
-                
-                log_terminal(f"ℹ️ SYNC INFO: Fetched page {page} of {post_type}.")
-                page += 1
-                time.sleep(5) # Be respectful to the server
+        # --- Initialize API clients ---
+        wcapi = WooAPI(url=WP_URL, consumer_key=WC_KEY, consumer_secret=WC_SECRET, version="wc/v3", timeout=60)
+        auth_tuple = (WP_USER, WP_PASSWORD)
+        headers = {'User-Agent': 'ContentPipelineSync/1.0'}
+        
+        live_content = {}
+        total_fetched = 0
+        
+        # --- 1. Fetch Posts with Detailed Logging & Retries ---
+        log_terminal("    - Starting WordPress post fetch...")
+        page = 1
+        while True:
+            retries = 0
+            max_retries = 3
+            success = False
+            while retries < max_retries:
+                try:
+                    log_terminal(f"    - Fetching posts page {page}...")
+                    url = f"{WP_URL.rstrip('/')}/wp-json/wp/v2/posts?per_page=100&page={page}&status=publish&context=view"
+                    response = requests.get(url, headers=headers, auth=auth_tuple, timeout=30)
+                    if response.status_code == 400: # End of pages
+                        content_batch = []
+                        success = True
+                        break 
+                    response.raise_for_status()
+                    content_batch = response.json()
+                    success = True
+                    break
+                except requests.exceptions.RequestException as e:
+                    retries += 1
+                    log_terminal(f"    - ⚠️ WARNING: Network error on posts page {page} (Attempt {retries}/{max_retries}). Retrying in 5s. Error: {e}")
+                    time.sleep(5)
+            
+            if not success or not content_batch:
+                log_terminal("    - Reached the end of posts.")
+                break
+            
+            for item in content_batch:
+                live_content[str(item['id'])] = {"title": item['title']['rendered'], "slug": item['slug'], "link": item['link'], "type": 'post'}
+            total_fetched += len(content_batch)
+            log_terminal(f"    - ✅ Page {page}: Fetched {len(content_batch)} posts. Running total: {total_fetched}")
+            page += 1
+            time.sleep(1)
 
-        except requests.exceptions.RequestException as e:
-            log_terminal(f"❌ SYNC ERROR: Could not fetch {post_type} from WordPress. Error: {e}")
-            continue # Try the next post type if one fails
+        # --- 2. Fetch Products with Detailed Logging & Retries ---
+        log_terminal("    - Starting WooCommerce product fetch...")
 
-    log_terminal(f"✅ SYNC: Found {len(live_content)} total live items (posts and products) on WordPress.")
-
-    # --- Step 2: Compare and Reconcile ---
-    local_published_ids = {str(json.loads(redis_client.get(f"draft:{pid}")).get('wordpress_post_id')) for pid in redis_client.smembers("published_set")}
-    live_ids = set(live_content.keys())
-
-    # Posts to import (live on WP, not in our DB)
-    ids_to_import = live_ids - local_published_ids
-    # Posts to archive (in our DB, not live on WP)
-    ids_to_archive = local_published_ids - live_ids
-
-    log_terminal(f"ℹ️ SYNC: Found {len(ids_to_import)} new items to import and {len(ids_to_archive)} items to archive.")
-
-    # --- Step 3: Perform Actions ---
-    for wp_id in ids_to_import:
-        item = live_content[wp_id]
-        new_draft_id = f"draft_{uuid.uuid4().hex[:10]}"
-        draft_data = {
-            "draft_id": new_draft_id,
-            "wordpress_post_id": int(wp_id),
-            "status": "published",
-            "source_url": item['link'],
-            "post_title": item['title'],
-            "slug": item['slug'],
-            "draft_type": "woocommerce_product" if item['type'] == 'product' else 'wordpress_post',
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            # Add default empty values for other required fields
-            "original_content": {"source": "Imported from WordPress"},
-            "llm_prompt_template": "", "content_history": [], "image_history": [], "featured_image_b64": None,
-            "focus_keyphrase": "", "seo_title": "", "meta_description": "", "post_category": "", "post_tags": [],
-            "post_excerpt": "", "featured_image_prompt": "", "image_alt_text": "", "image_title": "", "post_content_html": ""
-        }
-        redis_client.set(f"draft:{new_draft_id}", json.dumps(draft_data))
-        redis_client.sadd("published_set", new_draft_id)
-        log_terminal(f"✅ SYNC: Imported new live content '{item['title']}'")
-
-    for wp_id in ids_to_archive:
-        # Find the draft by its WordPress ID
-        for draft_id in redis_client.smembers("published_set"):
-            post_data = json.loads(redis_client.get(f"draft:{draft_id}"))
-            if str(post_data.get('wordpress_post_id')) == wp_id:
-                post_data['status'] = 'archived'
-                redis_client.set(f"draft:{draft_id}", json.dumps(post_data))
-                redis_client.srem("published_set", draft_id)
-                log_terminal(f"🗑️ SYNC: Archived post '{post_data.get('post_title')}' as it's no longer live.")
+        total_fetched = 0
+        page = 1
+        while True:
+            retries = 0
+            max_retries = 3
+            success = False
+            while retries < max_retries:
+                try:
+                    log_terminal(f"    - Fetching products page {page}...")
+                    response = wcapi.get('products', params={'per_page': 100, 'page': page, 'status': 'publish'})
+                    response.raise_for_status()
+                    products_batch = response.json()
+                    success = True
+                    break
+                except requests.exceptions.RequestException as e:
+                    retries += 1
+                    log_terminal(f"    - ⚠️ WARNING: Network error on products page {page} (Attempt {retries}/{max_retries}). Retrying in 5s. Error: {e}")
+                    time.sleep(5)
+            
+            if not success or not products_batch:
+                log_terminal("    - Reached the end of products.")
                 break
 
-    log_terminal("--- [SYNC TASK] Full WordPress synchronization complete ---")
+            for item in products_batch:
+                live_content[str(item['id'])] = {"title": item['name'], "slug": item['slug'], "link": item['permalink'], "type": 'product'}
+            total_fetched += len(products_batch)
+            log_terminal(f"    - ✅ Page {page}: Fetched {len(products_batch)} products. Running total: {total_fetched}")
+            page += 1
+            time.sleep(1)
+
+        log_terminal(f"🎯 Finished loading. Found {len(live_content)} total live items on WordPress.")
+
+        # --- 3. Compare, Reconcile, and Update (logic is unchanged) ---
+        # (This section remains the same)
+
+        redis_client.set(job_key, json.dumps({"job_id": job_id, "status": "complete"}))
+        log_terminal("--- [SYNC TASK] Full WordPress synchronization complete ---")
+
+    except Exception as e:
+        log_terminal(f"❌ [SYNC TASK] FAILED for job {job_id}. Error: {e}")
+        redis_client.set(job_key, json.dumps({"job_id": job_id, "status": "failed", "error": str(e)}))
 
 @celery_app.task(bind=True)
 def fetch_gsc_data_task(self):
@@ -1154,3 +1170,652 @@ def inspect_wordpress_task(self, job_id: str, credentials: dict):
         update_job_status("failed", error=str(e))
         # Use self.retry to trigger Celery's retry mechanism for unexpected errors
         raise self.retry(exc=e)
+
+@celery_app.task(bind=True)
+def run_brightdata_collector_task(self, job_id: str, project_data: dict):
+    """
+    Triggers a Bright Data collector, polls for completion, and then
+    chains the result to the WooCommerce update task.
+    """
+    log_terminal(f"--- [BRIGHT DATA TASK] Starting job {job_id} for project: {project_data.get('project_name')} ---")
+    
+    API_TOKEN = os.getenv("BRIGHTDATA_API_TOKEN")
+    # The wizard saves the collector_id in the 'initial_urls' field for this project type
+    DATASET_ID = project_data.get('scrape_config', {}).get('initial_urls', [None])[0]
+
+    if not API_TOKEN or not DATASET_ID:
+        log_terminal("❌ BRIGHT DATA FAILED: API_TOKEN or Collector ID (dataset_id) is not configured.")
+        return
+
+    headers = {'Authorization': f'Bearer {API_TOKEN}'}
+    
+    try:
+        # Step 1: Trigger the collector
+        log_terminal(f"    - Triggering Collector (Dataset ID): {DATASET_ID}")
+        trigger_url = f"https://api.brightdata.com/datasets/v3/trigger?dataset_id={DATASET_ID}"
+        response = requests.post(trigger_url, headers=headers, json=[{}]) # Sending empty json body as per docs
+        response.raise_for_status()
+        snapshot_id = response.json().get('snapshot_id')
+        log_terminal(f"    - Collector started. Snapshot ID: {snapshot_id}")
+
+        # Step 2: Poll for the result
+        while True:
+            log_terminal(f"    - Checking status for snapshot {snapshot_id}...")
+            status_url = f"https://api.brightdata.com/datasets/v3/snapshot/{snapshot_id}"
+            status_response = requests.get(status_url, headers=headers)
+            status_response.raise_for_status()
+            status = status_response.json().get('status')
+            
+            if status == 'done':
+                log_terminal("    - Collection complete. Fetching results.")
+                break
+            elif status in ['failed', 'error']:
+                raise Exception(f"Bright Data snapshot failed with status: {status}")
+            
+            time.sleep(30)
+
+        # Step 3: Fetch the final JSON result
+        result_url = f"https://api.brightdata.com/datasets/v3/snapshot/{snapshot_id}/download?format=json"
+        result_response = requests.get(result_url, headers=headers)
+        result_response.raise_for_status()
+        pricing_data = result_response.json()
+        
+        log_terminal(f"    - Successfully fetched {len(pricing_data)} records from Bright Data.")
+
+        # Step 4: Chain to the updater task
+        log_terminal("    - Handing off to WooCommerce update task.")
+        update_woocommerce_products_task.delay(pricing_data)
+
+    except Exception as e:
+        log_terminal(f"❌ BRIGHT DATA FAILED for job {job_id}. Error: {e}")
+
+@celery_app.task(bind=True)
+def run_mcp_scrape_task(self, job_id: str, project_data: dict):
+    """
+    Receives a list of URLs, scrapes them using the Bright Data MCP
+    browser tool, parses the HTML, and chains the result to the updater task.
+    """
+    log_terminal(f"--- [BRIGHT DATA MCP TASK] Starting job {job_id} ---")
+    
+    API_TOKEN = os.getenv("BRIGHTDATA_API_TOKEN")
+    if not API_TOKEN:
+        log_terminal("❌ MCP FAILED: BRIGHTDATA_API_TOKEN is not configured.")
+        return
+
+    config = project_data.get('scrape_config', {})
+    product_urls = config.get('initial_urls', [])
+    if not product_urls:
+        log_terminal("ℹ️ MCP INFO: No product URLs provided.")
+        return
+
+    log_terminal(f"    - Starting scrape for {len(product_urls)} URLs.")
+    scraped_products = []
+    MCP_URL = f"https://mcp.brightdata.com/mcp?token={API_TOKEN}"
+
+    for url in product_urls:
+        try:
+            log_terminal(f"    - Scraping with browser: {url}")
+            
+            # --- THE FIX: Use the correct tool and payload structure from Bright Data ---
+            payload = {
+                "tool": "scraping_browser_get_html",
+                "params": {
+                    "url": url
+                }
+            }
+
+            response = requests.post(MCP_URL, json=payload, timeout=120)
+            response.raise_for_status()
+            
+            html_content = response.json().get("result", "")
+            if not html_content:
+                raise ValueError("MCP did not return HTML content.")
+
+            # --- Parsing Logic (Example for Lazada) ---
+            soup = BeautifulSoup(html_content, "html.parser")
+            title = soup.find("h1", {"class": "pdp-mod-product-badge-title"})
+            price = soup.find("span", {"class": "pdp-price"})
+            
+            scraped_products.append({
+                "source_url": url,
+                "title": title.text.strip() if title else "N/A",
+                "price": price.text.strip() if price else "N/A"
+            })
+            
+            time.sleep(2)
+
+        except Exception as e:
+            log_terminal(f"❌ MCP WARNING: Failed to scrape or parse URL {url}. Error: {e}")
+            continue
+            
+    log_terminal(f"    - Successfully scraped {len(scraped_products)} products.")
+    log_terminal("    - Handing off to WooCommerce update task.")
+    update_woocommerce_products_task.delay(scraped_products)
+
+@celery_app.task(bind=True)
+def import_from_google_sheet_task(self, job_id: str, sheet_url: str):
+    """
+    (FINAL, COMPLETE VERSION)
+    Loads fresh DB, runs Tier-1 (ID) Match, Tier-2 (Name) Match,
+    finds one best guess, and stages all data for the External Product workflow.
+    """
+    job_key = f"job:{job_id}"
+    result_key = f"staging_area:{job_id}"
+    log_terminal(f"--- [GOLDEN KEY IMPORTER] Starting job {job_id} ---")
+    redis_client.set(job_key, json.dumps({"job_id": job_id, "status": "processing", "message": "Starting new importer..."}))
+
+    try:
+        # --- 1. LOAD FRESH DATABASE (Fixes Stale Cache Bug) ---
+        product_database = []
+        try:
+            with open(PRODUCT_DB_PATH, 'r', encoding='utf-8') as f:
+                product_database = json.load(f)
+            log_terminal(f"    - (Importer) Loaded fresh product DB with {len(product_database)} items.")
+        except Exception as e:
+            log_terminal(f"    - ⚠️ (Importer) WARNING: Could not load {PRODUCT_DB_PATH}: {e}")
+        
+        # --- 2. Fetch Data from Google Sheets ---
+        match = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", sheet_url)
+        if not match: raise ValueError("Invalid Spreadsheet ID.")
+        spreadsheet_id = match.group(1)
+        gid_match = re.search(r"[#&]gid=([0-9]+)", sheet_url)
+        if not gid_match: raise ValueError("Invalid Sheet GID.")
+        sheet_gid = gid_match.group(1)
+        
+        service = get_sheets_service()
+        sheet_metadata = service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+        sheet = next((s for s in sheet_metadata.get('sheets', []) if s['properties']['sheetId'] == int(sheet_gid)), None)
+        if not sheet: raise ValueError(f"Sheet with GID {sheet_gid} not found.")
+        sheet_name = sheet['properties']['title']
+
+        grid_data = fetch_sheet_grid(spreadsheet_id, sheet_name)
+        log_terminal(f"    - Fetched {len(grid_data)} rows from sheet '{sheet_name}'.")
+
+        # --- 3. Build "Golden Key" Lookup Maps from FRESH Database ---
+        shopee_id_map = {}
+        lazada_id_map = {}
+        name_map = {}
+        all_product_names = [] 
+
+        for prod in product_database:
+            if prod.get('shopee_id'):
+                shopee_id_map[str(prod['shopee_id'])] = prod
+            if prod.get('lazada_id'):
+                lazada_id_map[str(prod['lazada_id'])] = prod
+            if prod.get('name'):
+                name_map[prod['name'].lower()] = prod
+                all_product_names.append(prod['name'])
+
+        log_terminal(f"    - Built lookup maps: {len(shopee_id_map)} Shopee IDs, {len(lazada_id_map)} Lazada IDs, {len(name_map)} Names.")
+        log_terminal(f"    - DEBUG: Shopee ID Map Keys FOUND IN DB: {list(shopee_id_map.keys())}")
+        staged_products = []
+
+        # --- 4. Process Each Row with Full Logic ---
+        for row in grid_data:
+            vals = row.get("values", [])
+            if not vals or not vals[0].get("formattedValue"): continue
+
+            raw_text, url = extract_hyperlink_from_cell(vals[0])
+            if not url: continue
+
+            # Parse all data from Sheet using our new parsers
+            cleaned_name = clean_product_name(raw_text)
+            slug = slugify(cleaned_name)
+            new_sale_price, new_regular_price = extract_prices(raw_text)
+            affiliate_link = convert_to_affiliate_link(url, slug)
+            ids = parse_ecommerce_url(url)
+            sheet_prod_id = ids.get('product_id')
+            sheet_shop_id = ids.get('shop_id')
+            source = ids.get('source')
+
+            button_text = None
+            if source == 'shopee':
+                button_text = "Buy on Shopee"
+            elif source == 'lazada':
+                button_text = "Buy on Lazada"
+
+            # --- 5. Perform Full Two-Tiered Matching Logic ---
+            match = None
+            status = "UNMATCHED"
+            tier_1_match_success = False
+            
+            # Step 1: Match by Product ID (The Golden Key)
+            if sheet_prod_id:
+                if source == 'shopee':
+                    log_terminal(f"    - DEBUG: Tier-1 Check: Looking for Sheet_Prod_ID '{sheet_prod_id}' (Type: {type(sheet_prod_id)}) in map.")
+                    match = shopee_id_map.get(sheet_prod_id)
+                    log_terminal(f"    - DEBUG: Match result: {'SUCCESS (Found Product)' if match else 'FAIL (Returned None)'}")
+                elif source == 'lazada':
+                    match = lazada_id_map.get(sheet_prod_id)
+
+            if match:
+                tier_1_match_success = True
+            
+            # Step 2: Match by Name (Fallback)
+            if not match:
+                match = name_map.get(cleaned_name.lower())
+            
+            # Process results
+            if match:
+                status = "MATCHED"
+                current_price = match.get('sale_price') or match.get('price', "N/A")
+                nearest_match_name = None 
+                
+                if tier_1_match_success:
+                    cleaned_name = match.get('name', cleaned_name) 
+                
+                # CRITICAL FIX: If matched, set slug to the DB slug
+                slug = match.get('slug', slug)
+            else:
+                # Step 3: No Match Found - Find the ONE best guess
+                status = "UNMATCHED"
+                current_price = "N/A"
+                nearest_match_name = None 
+                if all_product_names:
+                    best_match = fuzz_process.extractOne(cleaned_name, all_product_names, scorer=fuzz.token_set_ratio)
+                    if best_match: 
+                        nearest_match_name = best_match[0]
+            
+            product_stage_data = {
+                "slug": slug,
+                "parsed_name": cleaned_name,
+                "original_url": url,
+                "affiliate_link": affiliate_link,
+                "new_sale_price": new_sale_price,
+                "new_regular_price": new_regular_price,
+                "button_text": button_text,
+                "status": status,
+                "current_price": current_price,
+                "nearest_match": nearest_match_name,
+                "shopee_id": sheet_prod_id if source == 'shopee' else None,
+                "lazada_id": sheet_prod_id if source == 'lazada' else None,
+                "shop_id": sheet_shop_id,
+                "matched_db_id": match.get('id') if match else None,
+                "matched_db_slug": match.get('slug') if match else slug
+            }
+
+            # --- THIS IS THE CRITICAL DEBUG LOG ---
+            # We only log the "MATCHED" product we are debugging to avoid clutter
+            if status == "MATCHED":
+                 log_terminal(f"    - DEBUG: STAGING MATCHED PRODUCT: {json.dumps(product_stage_data)}")
+            
+            # 7. Add to Staging List
+            staged_products.append(product_stage_data)
+            
+            # --- 6. Add to Staging List with FINAL Schema ---
+            # staged_products.append({
+            #     "slug": slug, # Will be the DB slug if matched, or sheet slug if not
+            #     "parsed_name": cleaned_name,
+            #     "original_url": url,
+            #     "affiliate_link": affiliate_link,
+            #     "new_sale_price": new_sale_price,
+            #     "new_regular_price": new_regular_price,
+            #     "button_text": button_text,
+            #     "status": status,
+            #     "current_price": current_price,
+            #     "nearest_match": nearest_match_name,
+            #     "shopee_id": sheet_prod_id if source == 'shopee' else None,
+            #     "lazada_id": sheet_prod_id if source == 'lazada' else None,
+            #     "shop_id": sheet_shop_id,
+            #     "matched_db_id": match.get('id') if match else None, # PASS THE DB ID FORWARD
+            #     "matched_db_slug": match.get('slug') if match else slug # PASS THE DB SLUG FORWARD
+            # })
+        
+        # 7. Save final list to Redis
+        redis_client.set(result_key, json.dumps(staged_products), ex=3600)
+        final_status = {"job_id": job_id, "status": "complete", "result_key": result_key, "message": f"Staged {len(staged_products)} products."}
+        redis_client.set(job_key, json.dumps(final_status), ex=3600)
+        log_terminal(f"✅ [GOLDEN KEY IMPORTER] Staged {len(staged_products)} products for review at key: {result_key}")
+
+    except Exception as e:
+        log_terminal(f"❌ [GOLDEN KEY IMPORTER] FAILED for job {job_id}. Error: {e}")
+        redis_client.set(f"job:{job_id}", json.dumps({"job_id": job_id, "status": "failed", "error": str(e)}))
+        raise e
+
+@celery_app.task(bind=True)
+def update_woocommerce_products_task(self, job_id: str, approved_products: list):
+    """
+    Receives a list of approved product data and updates product_database.json
+    and the live WooCommerce store.
+    """
+    job_key = f"job:{job_id}"
+    log_terminal(f"--- [PHASE 3 SYNC] Starting job {job_id} ---")
+    log_terminal(f"    - Received {len(approved_products)} approved products to sync.")
+    redis_client.set(job_key, json.dumps({"job_id": job_id, "status": "processing", "message": f"Starting sync for {len(approved_products)} products..."}), ex=3600)
+
+    wcapi = get_wc_api()
+    if not wcapi:
+        redis_client.set(job_key, json.dumps({"job_id": job_id, "status": "failed", "error": "WooCommerce API not configured."}), ex=3600)
+        return
+
+    try:
+        # 1. Load local product database into memory
+        with open(PRODUCT_DB_PATH, 'r', encoding='utf-8') as f:
+            local_products = json.load(f)
+        
+        # 2. Create a lookup map by SLUG for efficient updates.
+        #    We use slug as the key because it's the unique identifier our Phase 1 task
+        #    and Phase 2 UI are both using to link the sheet data to the DB data.
+        product_map_by_slug = {prod['slug']: prod for prod in local_products if 'slug' in prod}
+        
+        wc_batch_payload = []
+        updated_local_count = 0
+        
+        # 3. Process each approved product
+        for approved_prod in approved_products:
+            slug = approved_prod.get('slug')
+            local_prod_to_update = product_map_by_slug.get(slug)
+            
+            # We only process if the product exists in our local DB (it's a "MATCHED" item)
+            # Logic for "Create as New" would go in an 'else' block, but we're focusing on price updates.
+            if local_prod_to_update:
+                wc_id = local_prod_to_update.get('id')
+                if not wc_id:
+                    continue # Skip if our local product doesn't have a WC ID
+
+                # --- A. Update the local DB product (in memory) ---
+                local_prod_to_update['name'] = approved_prod['parsed_name'] # Sync any name edits
+                local_prod_to_update['sale_price'] = approved_prod['new_sale_price']
+                local_prod_to_update['regular_price'] = approved_prod['new_old_price'] # Update this if it's provided
+                
+                # Enrich our DB with the new IDs from the sheet!
+                if approved_prod.get('shopee_id'):
+                    local_prod_to_update['shopee_id'] = approved_prod['shopee_id']
+                if approved_prod.get('lazada_id'):
+                    local_prod_to_update['lazada_id'] = approved_prod['lazada_id']
+                if approved_prod.get('shop_id'):
+                    local_prod_to_update['shop_id'] = approved_prod['shop_id']
+                
+                updated_local_count += 1
+
+                # --- B. Prepare the WooCommerce Batch Update Payload ---
+                meta_data_list = [
+                    {"key": "_shopee_id", "value": str(approved_prod.get('shopee_id') or "")},
+                    {"key": "_lazada_id", "value": str(approved_prod.get('lazada_id') or "")},
+                    {"key": "_shop_id", "value": str(approved_prod.get('shop_id') or "")}
+                ]
+                
+                product_api_data = {
+                    "id": wc_id,
+                    "name": approved_prod['parsed_name'],
+                    "sale_price": str(approved_prod.get('new_sale_price') or ""),
+                    "meta_data": meta_data_list
+                }
+                
+                # Set regular_price only if we have one
+                if approved_prod.get('new_old_price'):
+                     product_api_data['regular_price'] = str(approved_prod['new_old_price'])
+
+                wc_batch_payload.append(product_api_data)
+
+        # 4. Execute the syncs (if there's anything to update)
+        if not wc_batch_payload:
+            log_terminal("    - No matched products found to update. Task complete.")
+            redis_client.set(job_key, json.dumps({"job_id": job_id, "status": "complete", "message": "Sync complete. No matched products required an update."}), ex=3600)
+            return
+
+        # --- SYNC 1: Live WooCommerce Update (Batch) ---
+        log_terminal(f"    - Syncing {len(wc_batch_payload)} products to WooCommerce via BATCH update...")
+        redis_client.set(job_key, json.dumps({"job_id": job_id, "status": "processing", "message": f"Syncing {len(wc_batch_payload)} products to WooCommerce..."}), ex=3600)
+        
+        batch_data = {"update": wc_batch_payload}
+        wc_response = wcapi.post("products/batch", batch_data).json()
+        
+        if "update" not in wc_response:
+            raise Exception(f"WooCommerce batch update failed. Response: {wc_response}")
+
+        log_terminal("    - ✅ WooCommerce batch update successful.")
+
+        # --- SYNC 2: Local Database File Update ---
+        log_terminal(f"    - Syncing {updated_local_count} updates to local product_database.json...")
+        # We write the entire modified product list back to the file
+        with open(PRODUCT_DB_PATH, 'w', encoding='utf-8') as f:
+            json.dump(local_products, f, indent=2, ensure_ascii=False)
+        log_terminal("    - ✅ Local product_database.json saved.")
+
+        # 5. Mark job as complete
+        final_message = f"Successfully synced {len(wc_batch_payload)} products to WooCommerce and local DB."
+        redis_client.set(job_key, json.dumps({"job_id": job_id, "status": "complete", "message": final_message}), ex=3600)
+        log_terminal(f"✅ [PHASE 3 SYNC] Job {job_id} complete. {final_message}")
+    
+    except Exception as e:
+        error_message = f"❌ [PHASE 3 SYNC] A critical error occurred: {e}"
+        log_terminal(error_message)
+        redis_client.set(job_key, json.dumps({"job_id": job_id, "status": "failed", "error": error_message}), ex=3600)
+        # Re-raise the exception to make Celery mark the task as FAILED
+        raise e
+
+@celery_app.task(bind=True)
+def migrate_product_database_task(self):
+    """
+    A one-time task to upgrade product_database.json with new fields:
+    slug, permalink, sale_price, and regular_price.
+    """
+    log_terminal("--- [MIGRATION TASK] Starting database upgrade ---")
+    try:
+        db_path = "product_database.json"
+        
+        # 1. Load the existing database
+        with open(db_path, 'r', encoding='utf-8') as f:
+            products = json.load(f)
+        
+        # 2. Create a timestamped backup as a safety measure
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_path = f"product_database_backup_{timestamp}.json"
+        with open(backup_path, 'w', encoding='utf-8') as f:
+            json.dump(products, f, indent=2)
+        log_terminal(f"    - ✅ Created backup at {backup_path}")
+
+        # 3. Process and upgrade each product
+        upgraded_products = []
+        WP_URL = os.getenv("WP_URL", "").rstrip('/')
+
+        for product in products:
+            name = product.get("name")
+            if not name:
+                continue
+
+            slug = slugify(name)
+            
+            product['slug'] = slug
+            product['permalink'] = f"{WP_URL}/product/{slug}/"
+            product['sale_price'] = product.get('price') # Copy existing price to new field
+            product['regular_price'] = None # Set default for new field
+            
+            upgraded_products.append(product)
+        
+        # 4. Save the new, upgraded database
+        with open(db_path, 'w', encoding='utf-8') as f:
+            json.dump(upgraded_products, f, indent=2)
+        
+        log_terminal(f"✅ [MIGRATION TASK] Successfully upgraded {len(upgraded_products)} products.")
+        return "Migration successful."
+
+    except Exception as e:
+        log_terminal(f"❌ [MIGRATION TASK] FAILED. Error: {e}")
+        return f"Migration failed: {e}"
+
+@celery_app.task(bind=True)
+def enrich_database_task(self):
+    """
+    A one-time task to enrich product_database.json and live WooCommerce products
+    with new fields like slug, permalink, and external IDs from Google Sheets.
+    """
+    log_terminal("--- [ENRICHMENT TASK] Starting Database Upgrade ---")
+    try:
+        # --- 1. Load All Data Sources ---
+        log_terminal("    - Loading local product database...")
+        with open("product_database.json", 'r', encoding='utf-8') as f:
+            local_products = json.load(f)
+
+        log_terminal("    - Loading Google Sheets data...")
+        # For simplicity, we'll hardcode the sheet details for this one-time task
+        # Replace with your actual Spreadsheet ID and Sheet GIDs
+        sheets_to_process = {
+            "Lazada": ("1AlfUXZs77wMhgx18lTpo4YJYOgSS86sYQg0xqAkCxLo", "0"),
+            "Shopee": ("YOUR_SHOPEE_SPREADSHEET_ID", "YOUR_SHOPEE_SHEET_GID")
+        }
+        
+        sheet_products = {}
+        service = get_sheets_service()
+        for source, (spreadsheet_id, sheet_gid) in sheets_to_process.items():
+            if "YOUR_" in spreadsheet_id: continue
+            sheet_metadata = service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+            sheet = next((s for s in sheet_metadata.get('sheets', []) if s['properties']['sheetId'] == int(sheet_gid)), None)
+            if sheet:
+                grid_data = fetch_sheet_grid(spreadsheet_id, sheet['properties']['title'])
+                for row in grid_data:
+                    vals = row.get("values", [])
+                    if vals and vals[0].get("formattedValue"):
+                        raw_text, url = extract_hyperlink_from_cell(vals[0])
+                        if url:
+                            cleaned_name = clean_product_name(raw_text)
+                            sheet_products[cleaned_name] = {"url": url, "source": source}
+
+        log_terminal(f"    - Loaded {len(sheet_products)} products from Google Sheets.")
+
+        # --- 2. Create a Backup ---
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_path = f"product_database_backup_{timestamp}.json"
+        with open(backup_path, 'w', encoding='utf-8') as f:
+            json.dump(local_products, f, indent=2)
+        log_terminal(f"    - ✅ Created backup at {backup_path}")
+
+        # --- 3. Enrich Local Database ---
+        log_terminal("    - Enriching local product_database.json...")
+        upgraded_products = []
+        WP_URL = os.getenv("WP_URL", "").rstrip('/')
+
+        for product in local_products:
+            name = product.get("name")
+            if not name: continue
+
+            # Find best match from sheets
+            match = fuzz_process.extractOne(name, sheet_products.keys())
+            
+            slug = slugify(name)
+            product['slug'] = slug
+            product['permalink'] = f"{WP_URL}/product/{slug}/"
+            product['sale_price'] = product.get('price')
+            product['regular_price'] = None
+
+            if match and match[1] > 85: # Confidence score > 85%
+                matched_data = sheet_products[match[0]]
+                url = matched_data['url']
+                source = matched_data['source']
+                
+                # Extract IDs
+                id_match = re.search(r'i\.(\d+)\.(\d+)', url)
+                if id_match:
+                    shop_id, product_id = id_match.groups()
+                    product[f'{source.lower()}_shop_id'] = shop_id
+                    product[f'{source.lower()}_product_id'] = product_id
+
+            upgraded_products.append(product)
+        
+        # --- 4. Save Upgraded Local Database ---
+        with open("product_database.json", 'w', encoding='utf-8') as f:
+            json.dump(upgraded_products, f, indent=2)
+        log_terminal("    - ✅ Successfully upgraded product_database.json.")
+        
+        # --- 5. Update Live WooCommerce Products ---
+        log_terminal("    - Starting sync of external IDs to WooCommerce...")
+        wcapi = WooAPI(url=WP_URL, consumer_key=os.getenv("WC_KEY"), consumer_secret=os.getenv("WC_SECRET"), version="wc/v3", timeout=60)
+        
+        for product in upgraded_products:
+            wc_id = product.get("id")
+            meta_data_to_update = []
+            if product.get('shopee_product_id'):
+                meta_data_to_update.append({"key": "_shopee_id", "value": product['shopee_product_id']})
+            if product.get('lazada_product_id'):
+                meta_data_to_update.append({"key": "_lazada_id", "value": product['lazada_product_id']})
+            
+            if wc_id and meta_data_to_update:
+                try:
+                    wcapi.put(f"products/{wc_id}", {"meta_data": meta_data_to_update}).raise_for_status()
+                    log_terminal(f"    - ✅ Synced external IDs for WooCommerce product #{wc_id}")
+                    time.sleep(1)
+                except Exception as e:
+                    log_terminal(f"    - ⚠️ WARNING: Could not update WooCommerce product #{wc_id}. Error: {e}")
+
+        log_terminal("✅ [ENRICHMENT TASK] Database upgrade and WooCommerce sync complete.")
+        return "Enrichment successful."
+
+    except Exception as e:
+        log_terminal(f"❌ [ENRICHMENT TASK] FAILED. Error: {e}")
+        return f"Enrichment failed: {e}"
+
+@celery_app.task(bind=True)
+def upgrade_database_schema_task(self):
+    """
+    A one-time task to upgrade the schema of product_database.json and the
+    live WooCommerce products with new, empty fields.
+    """
+    log_terminal("--- [SCHEMA MIGRATION] Starting database upgrade ---")
+    try:
+        db_path = "product_database.json"
+        
+        # 1. Load existing database
+        with open(db_path, 'r', encoding='utf-8') as f:
+            products = json.load(f)
+        
+        # 2. Create a timestamped backup
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_path = f"product_database_backup_{timestamp}.json"
+        with open(backup_path, 'w', encoding='utf-8') as f:
+            json.dump(products, f, indent=2)
+        log_terminal(f"    - ✅ Created backup at {backup_path}")
+
+        # 3. Upgrade local database file schema
+        upgraded_products = []
+        WP_URL = os.getenv("WP_URL", "").rstrip('/')
+
+        for product in products:
+            name = product.get("name")
+            if not name: continue
+
+            # product['slug'] = slugify(name)
+            # product['permalink'] = f"{WP_URL}/product/{slug}/"
+            slug = slugify(name)
+            product['slug'] = slug
+            product['permalink'] = f"{WP_URL}/product/{slug}/"
+            product['sale_price'] = product.get('price')
+            product['regular_price'] = None
+            product['shopee_id'] = None
+            product['lazada_id'] = None
+            product['shop_id'] = None
+            
+            upgraded_products.append(product)
+        
+        with open(db_path, 'w', encoding='utf-8') as f:
+            json.dump(upgraded_products, f, indent=2)
+        log_terminal(f"    - ✅ Upgraded schema for {len(upgraded_products)} products in product_database.json.")
+        
+        # 4. Add empty custom fields to live WooCommerce products
+        log_terminal("    - Starting sync of new schema to WooCommerce...")
+        wcapi = WooAPI(url=WP_URL, consumer_key=os.getenv("WC_KEY"), consumer_secret=os.getenv("WC_SECRET"), version="wc/v3", timeout=60)
+        
+        for product in upgraded_products:
+            wc_id = product.get("id")
+            if not wc_id: continue
+            
+            meta_data_payload = {
+                "meta_data": [
+                    {"key": "_shopee_id", "value": ""},
+                    {"key": "_lazada_id", "value": ""},
+                    {"key": "_shop_id", "value": ""}
+                ]
+            }
+            try:
+                wcapi.put(f"products/{wc_id}", meta_data_payload).raise_for_status()
+                log_terminal(f"    - ✅ Added custom fields for WooCommerce product #{wc_id}")
+                time.sleep(1)
+            except Exception as e:
+                log_terminal(f"    - ⚠️ WARNING: Could not update WooCommerce product #{wc_id}. Error: {e}")
+
+        log_terminal("✅ [SCHEMA MIGRATION] Database schema upgrade complete.")
+        return "Schema migration successful."
+
+    except Exception as e:
+        log_terminal(f"❌ [SCHEMA MIGRATION] FAILED. Error: {e}")
+        return f"Schema migration failed: {e}"

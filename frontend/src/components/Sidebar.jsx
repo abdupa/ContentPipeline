@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, Globe, CheckSquare, Settings, BookOpen, History, Send, Edit3, BarChart2, TrendingUp, Wrench } from 'lucide-react';
+import { LayoutDashboard, Globe, CheckSquare, Settings, BookOpen, History, Send, Edit3, BarChart2, TrendingUp, Wrench, Smartphone } from 'lucide-react';
 import logo from '../assets/cpl-logo4.png';
 
 const Sidebar = ({ onMenuItemClick, activeItem }) => {
@@ -9,6 +9,7 @@ const Sidebar = ({ onMenuItemClick, activeItem }) => {
     { name: 'Performance', icon: BarChart2 },
     { name: 'Scraping Projects', icon: Globe },
     { name: 'Manual Editor', icon: Edit3 },
+    { name: 'Product Database', icon: Smartphone },
     { name: 'Content Library', icon: BookOpen },
     { name: 'Approval Queue', icon: CheckSquare },
     { name: 'Published Posts', icon: Send },

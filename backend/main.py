@@ -1,20 +1,17 @@
-from fastapi.responses import FileResponse
-from google_client import get_gsc_service
-from google_auth_oauthlib.flow import Flow
-from fastapi.responses import RedirectResponse
 import uuid
 import json
 import base64
 import requests
 import os
 import time
+import traceback
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 from datetime import datetime, timezone, date, timedelta
 from fastapi import FastAPI, UploadFile, File, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
-from shared_state import redis_client, log_terminal
-# from tasks import generate_preview_task, run_project_task, regenerate_content_task, regenerate_image_task
+from fastapi.responses import RedirectResponse, FileResponse
+from shared_state import redis_client, log_terminal, log_action
 from tasks import generate_preview_task, run_project_task, regenerate_content_task, regenerate_image_task, PROCESSED_URLS_KEY
 from data_tasks import update_product_database_task
 from openai import OpenAI
@@ -23,6 +20,8 @@ from playwright.async_api import async_playwright
 from urllib.parse import urljoin
 import csv
 from io import StringIO
+from google_client import get_gsc_service
+from google_auth_oauthlib.flow import Flow
 
 
 
@@ -38,6 +37,32 @@ app.add_middleware(
 openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # --- Pydantic Models ---
+class StagedProduct(BaseModel):
+    class Config:
+        extra = "ignore"
+    
+    status: str
+    slug: str
+    parsed_name: str
+    original_url: str
+    affiliate_link: str
+    new_sale_price: Optional[float] = None
+    new_regular_price: Optional[float] = None
+    button_text: Optional[str] = None
+    current_price: Any
+    nearest_match: Optional[str] = None
+    shopee_id: Optional[str] = None
+    lazada_id: Optional[str] = None
+    shop_id: Optional[str] = None
+    action: Optional[str] = None        # To accept 'approve', 'link', 'ignore'
+    linked_db_id: Optional[int] = None  # To accept the WC ID you linked
+    matched_db_id: Optional[int] = None
+    matched_db_slug: Optional[str] = None
+
+class ProcessStagedPayload(BaseModel):
+    job_id: str
+    approved_products: List[StagedProduct]
+
 class WordPressInspectPayload(BaseModel):
     url: str
     username: str
@@ -80,12 +105,12 @@ class CrawlLevel(BaseModel):
     selector: str
 
 class ScrapeConfig(BaseModel):
-    scrape_type: str
+    scrape_type: Optional[str] = None #<-- Make optional
     initial_urls: List[str]
-    link_selector: Optional[str] = None # <-- ADD THIS LINE
+    link_selector: Optional[str] = None
     crawling_levels: Optional[List[CrawlLevel]] = None
     final_urls: Optional[List[str]] = None
-    element_rules: List[ScrapeElementRule]
+    element_rules: Optional[List[ScrapeElementRule]] = [] #<-- Make optional and default to empty list
     modelUrls: Optional[List[str]] = None
 
 class Project(BaseModel):
@@ -132,7 +157,8 @@ class SiteSelectionPayload(BaseModel):
 # This is the same redirect URI we configured in the Google Cloud Console.
 REDIRECT_URI = "http://localhost:8000/api/auth/callback"
 # This defines the permission we are asking for.
-SCOPES = ["https://www.googleapis.com/auth/webmasters.readonly"]
+SCOPES = ["https://www.googleapis.com/auth/webmasters.readonly", "https://www.googleapis.com/auth/spreadsheets.readonly"]
+# SCOPES = ["https://www.googleapis.com/auth/webmasters.readonly"]
 
 @app.get("/api/auth/google")
 async def auth_google():
@@ -533,11 +559,17 @@ async def run_project(project_id: str, options: RunOptions):
     
     project_type = project_data.get("project_type")
     
-    if project_type == "phone_spec_scraper":
+    # --- THIS IS THE FINAL, CORRECTED ROUTING LOGIC ---
+    if project_type == "brightdata_mcp":
+        from tasks import run_mcp_scrape_task
+        run_mcp_scrape_task.delay(job_id, project_data)
+        log_terminal(f"📊 Kicked off BRIGHT DATA MCP run for project '{project_data.get('project_name')}'. Job ID: {job_id}")
+    
+    elif project_type == "phone_spec_scraper":
         run_phone_scraper_task.delay(job_id, project_data)
         log_terminal(f"🚀 Kicked off PHONE SCRAPER run for project '{project_data.get('project_name')}'. Job ID: {job_id}")
-    else:
-        # --- THE FIX: Pass the custom_url_list to the Celery task ---
+
+    else: # Default is the standard article scraper
         run_project_task.delay(
             job_id,
             project_data,
@@ -591,7 +623,6 @@ async def get_dashboard_stats():
         raise HTTPException(status_code=500, detail="Failed to retrieve dashboard stats.")
 
 # --- NEW: Google Search Console Integration ---
-
 @app.get("/api/gsc/sites")
 async def get_gsc_sites():
     """
@@ -1073,7 +1104,6 @@ async def trigger_gsc_insights_fetch():
         raise HTTPException(status_code=500, detail="Failed to queue the GSC insights fetch task.")
 
 # --- NEW: Tools Endpoints ---
-
 @app.post("/api/tools/inspect-wordpress", response_model=JobCreationResponse)
 async def inspect_wordpress_site(payload: WordPressInspectPayload):
     """
@@ -1139,3 +1169,237 @@ async def download_inspection_result(job_id: str):
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename=wordpress_inspection_{job_id}.csv"}
     )
+
+@app.get("/api/products")
+async def get_all_products():
+    """
+    Retrieves all product data from the local product_database.json file.
+    """
+    log_terminal("--- HIT: GET /api/products ---")
+    try:
+        # This assumes product_database.json is in the same directory as main.py
+        with open("product_database.json", 'r', encoding='utf-8') as f:
+            products = json.load(f)
+        return products
+    except FileNotFoundError:
+        log_terminal("⚠️  product_database.json not found. Returning empty list.")
+        return []
+    except Exception as e:
+        log_terminal(f"❌ ERROR reading product_database.json: {e}")
+        raise HTTPException(status_code=500, detail="Failed to read product database.")
+
+@app.post("/api/import/google-sheet", response_model=JobCreationResponse)
+async def import_from_google_sheet(payload: dict):
+    """
+    Kicks off a background task to import and parse data from a Google Sheet.
+    """
+    log_terminal("--- HIT: POST /api/import/google-sheet ---")
+    try:
+        from tasks import import_from_google_sheet_task
+        
+        sheet_url = payload.get("sheet_url")
+        if not sheet_url:
+            raise HTTPException(status_code=400, detail="Google Sheet URL is required.")
+
+        job_id = f"import_{uuid.uuid4().hex[:10]}"
+        job_status = { "job_id": job_id, "status": "starting" }
+        redis_client.set(f"job:{job_id}", json.dumps(job_status), ex=3600)
+
+        import_from_google_sheet_task.delay(job_id, sheet_url)
+        
+        log_terminal(f"✅ Queued Google Sheet import for {sheet_url}. Job ID: {job_id}")
+        return {"job_id": job_id}
+    except Exception as e:
+        log_terminal(f"❌ ERROR queuing Google Sheet import: {e}")
+        raise HTTPException(status_code=500, detail="Failed to queue the import task.")
+    
+@app.get("/api/import/staged-data/{job_id}", response_model=List[StagedProduct])
+async def get_staged_data(job_id: str):
+    """
+    Retrieves the staged product data for a given import job for user review.
+    """
+    log_terminal(f"--- HIT: GET /api/import/staged-data/{job_id} ---")
+    staging_key = f"staging_area:{job_id}"
+    staged_json = redis_client.get(staging_key)
+
+    if not staged_json:
+        raise HTTPException(status_code=404, detail="Staged data not found or expired.")
+    
+    return json.loads(staged_json)
+
+@app.post("/api/import/process-staged-data", response_model=JobCreationResponse)
+async def process_staged_data(payload: ProcessStagedPayload):
+    """
+    (ROBUST LOGGING VERSION)
+    Kicks off the background sync task, with detailed step-logging
+    and full exception traceback reporting.
+    """
+    log_terminal("--- HIT: POST /api/import/process-staged-data ---")
+    try:
+        from data_tasks import update_woocommerce_products_task
+        
+        final_job_id = f"wcsync_{uuid.uuid4().hex[:10]}"
+        job_status = { "job_id": final_job_id, "status": "starting" }
+        log_terminal("    - Step 1: Setting job status in Redis...")
+        redis_client.set(f"job:{final_job_id}", json.dumps(job_status), ex=3600)
+        log_terminal("    - Step 1: SUCCESS.")
+
+        # --- This is the part that is failing ---
+        log_terminal("    - Step 2: Converting Pydantic models to dict list (using .dict())...")
+        products_as_dict_list = [p.dict() for p in payload.approved_products]
+        # products_as_dict_list = [p.model_dump() for p in payload.approved_products] # <-- This is the v2 command
+        log_terminal(f"    - Step 2: SUCCESS. Converted {len(products_as_dict_list)} models.")
+
+        log_terminal("    - Step 3: Calling .delay() to queue Celery task...")
+        update_woocommerce_products_task.delay(final_job_id, products_as_dict_list)
+        log_terminal("    - Step 3: SUCCESS. Task successfully queued.")
+        # --- End of fail zone ---
+
+        log_terminal(f"✅ Queued final WooCommerce sync. Job ID: {final_job_id}")
+        return {"job_id": final_job_id}
+
+    except Exception as e:
+        # --- NEW: FULL TRACEBACK LOGGING ---
+        error_details = traceback.format_exc()
+        log_terminal("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        log_terminal("❌ FATAL ERROR IN process_staged_data ❌")
+        log_terminal(f"Exception Type: {type(e)}")
+        log_terminal(f"Exception Details: {e}")
+        log_terminal(f"Full Traceback:\n{error_details}")
+        log_terminal("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        
+        # Also print to stdout directly just in case log_terminal has an issue
+        print(f"--- ❌ FATAL ERROR: {error_details} ---", flush=True)
+
+        raise HTTPException(status_code=500, detail="Failed to queue task. Check backend-1 log for full traceback.")
+
+@app.get("/api/import/staged-data/{job_id}", response_model=List[StagedProduct])
+async def get_staged_data(job_id: str):
+    """
+    Retrieves the staged product data for a given import job for user review.
+    """
+    log_terminal(f"--- HIT: GET /api/import/staged-data/{job_id} ---")
+    staging_key = f"staging_area:{job_id}"
+    staged_json = redis_client.get(staging_key)
+
+    if not staged_json:
+        raise HTTPException(status_code=404, detail="Staged data not found or expired.")
+    
+    return json.loads(staged_json)
+
+@app.post("/api/import/process-staged-data", response_model=JobCreationResponse)
+async def process_staged_data(payload: ProcessStagedPayload):
+    """
+    Kicks off a background task to update WooCommerce with the user's
+    approved products from the staging area.
+    """
+    log_terminal("--- HIT: POST /api/import/process-staged-data ---")
+    try:
+        from data_tasks import update_woocommerce_products_task
+        
+        final_job_id = f"wcsync_{uuid.uuid4().hex[:10]}"
+        job_status = { "job_id": final_job_id, "status": "starting" }
+        redis_client.set(f"job:{final_job_id}", json.dumps(job_status), ex=3600)
+
+        products_as_dict_list = [p.dict() for p in payload.approved_products]
+        update_woocommerce_products_task.delay(final_job_id, products_as_dict_list)
+        
+        log_terminal(f"✅ Queued final WooCommerce sync. Job ID: {final_job_id}")
+        return {"job_id": final_job_id}
+    except Exception as e:
+        log_terminal(f"❌ ERROR queuing final WooCommerce sync: {e}")
+        raise HTTPException(status_code=500, detail="Failed to queue the final sync task.")
+    
+@app.get("/api/run-migration")
+async def run_migration():
+    """
+    A temporary, one-time endpoint to trigger the database migration task.
+    """
+    log_terminal("--- HIT: GET /api/run-migration ---")
+    try:
+        from tasks import migrate_product_database_task
+        task = migrate_product_database_task.delay()
+        return {"message": "Database migration task has been queued. Check the Celery worker logs for progress and result.", "task_id": task.id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/sync/run-master-sync", response_model=JobCreationResponse)
+async def run_master_sync():
+    """
+    Manually triggers the full WordPress synchronization task.
+    """
+    log_terminal("--- HIT: POST /api/sync/run-master-sync ---")
+    try:
+        from tasks import full_wordpress_sync_task
+        
+        job_id = f"sync_{uuid.uuid4().hex[:10]}"
+        job_status = { "job_id": job_id, "status": "starting" }
+        redis_client.set(f"job:{job_id}", json.dumps(job_status), ex=3600)
+
+        full_wordpress_sync_task.delay(job_id)
+        
+        return {"job_id": job_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Failed to queue the sync task.")
+
+@app.put("/api/import/staged-data/{job_id}")
+async def save_staged_data(job_id: str, staged_products: List[StagedProduct]):
+    """
+    Saves the user's edits to the staged data back to Redis.
+    """
+    log_terminal(f"--- HIT: PUT /api/import/staged-data/{job_id} ---")
+    try:
+        staging_key = f"staging_area:{job_id}"
+        redis_client.set(staging_key, json.dumps([p.dict() for p in staged_products]), ex=3600)
+        log_action("STAGED_DATA_SAVED", {"job_id": job_id})
+        return {"message": "Changes saved successfully."}
+    except Exception as e:
+        log_terminal(f"❌ ERROR saving staged data: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save changes.")
+
+@app.get("/api/run-enrichment")
+async def run_enrichment():
+    """
+    A temporary, one-time endpoint to trigger the database enrichment task.
+    """
+    log_terminal("--- HIT: GET /api/run-enrichment ---")
+    try:
+        from tasks import enrich_database_task
+        task = enrich_database_task.delay()
+        return {"message": "Database enrichment task has been queued. Check the Celery worker logs for progress and result.", "task_id": task.id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.get("/api/run-schema-upgrade")
+async def run_schema_upgrade():
+    """
+    A temporary, one-time endpoint to trigger the database schema upgrade task.
+    """
+    log_terminal("--- HIT: GET /api/run-schema-upgrade ---")
+    try:
+        from tasks import upgrade_database_schema_task
+        task = upgrade_database_schema_task.delay()
+        return {"message": "Database schema upgrade task has been queued. Check the Celery worker logs for progress.", "task_id": task.id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.get("/api/tools/inspect-product/{product_id}")
+async def get_live_product_data(product_id: int):
+    """
+    Kicks off a background task to fetch the full, raw JSON for a single
+    product directly from WooCommerce for debugging.
+    """
+    log_terminal(f"--- HIT: GET /api/tools/inspect-product/{product_id} ---")
+    try:
+        from data_tasks import inspect_wc_product_task # Import our new task
+        
+        job_id = f"inspect_wc_{product_id}_{uuid.uuid4().hex[:6]}"
+        job_status = { "job_id": job_id, "status": "starting" }
+        redis_client.set(f"job:{job_id}", json.dumps(job_status), ex=3600)
+
+        inspect_wc_product_task.delay(job_id, product_id)
+        
+        return {"job_id": job_id}
+    except Exception as e:
+        log_terminal(f"❌ ERROR queuing inspection task: {e}")
+        raise HTTPException(status_code=500, detail="Failed to queue the inspection task.")

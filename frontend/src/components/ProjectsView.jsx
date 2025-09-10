@@ -154,11 +154,14 @@ const ProjectsView = ({ onCreateNew, onRunProject, onEditProject }) => {
   };
 
   const handleRunClick = (project) => {
-    if (project.project_type === 'phone_spec_scraper') {
-      if (window.confirm(`Are you sure you want to run the scraper "${project.project_name}"?`)) {
-        onRunProject(project.project_id, {});
+    // --- THE FIX: Add the 'brightdata_mcp' type to this condition ---
+    if (project.project_type === 'phone_spec_scraper' || project.project_type === 'brightdata_mcp') {
+      // For phone scrapers and Bright Data jobs, run immediately without a modal.
+      if (window.confirm(`Are you sure you want to run the job "${project.project_name}"?`)) {
+        onRunProject(project.project_id, {}); // Pass empty options
       }
     } else {
+      // For standard articles, open the interactive options modal.
       setProjectToRun(project);
       setIsModalOpen(true);
     }
@@ -175,16 +178,21 @@ const ProjectsView = ({ onCreateNew, onRunProject, onEditProject }) => {
   };
 
   const handleRefreshDatabase = async () => {
-    setIsRefreshing(true);
-    try {
-      const response = await apiClient.post('/api/data/refresh-products');
-      alert(response.data.message);
-    } catch (err) {
-      alert("Failed to start the database refresh task. Check the backend logs.");
-    } finally {
-      setIsRefreshing(false);
+    if (window.confirm("This will start a full sync with your live WordPress site. This may take a few minutes. Continue?")) {
+        setIsRefreshing(true);
+        try {
+            // --- FIX: Call the correct endpoint that triggers our modified task ---
+            await apiClient.post('/api/data/refresh-products');
+            alert("Database refresh task started! It will run in the background. Please check the Celery logs for progress.");
+            // This task is a background sync and doesn't return a job ID, so we just show an alert.
+        } catch (err) {
+            alert("Failed to start the sync task. Check the backend logs.");
+        } finally {
+            setIsRefreshing(false);
+        }
     }
   };
+
 
   if (isLoading) {
     return <div className="flex justify-center items-center h-64"><Loader2 className="w-12 h-12 animate-spin text-indigo-600" /></div>;
