@@ -16,6 +16,7 @@ import PerformanceView from './components/PerformanceView.jsx';
 import InsightsView from './components/InsightsView.jsx';
 import ToolsView from './components/ToolsView.jsx';
 import PriceUpdateReviewView from './components/PriceUpdateReviewView.jsx';
+import SyncReportView from './components/SyncReportView.jsx';
 import { HelpCircle, Bell, ChevronDown } from 'lucide-react';
 
 const App = () => {
@@ -93,9 +94,17 @@ const App = () => {
       case 'performance': return <PerformanceView />;
       case 'projects': return <ProjectsView onCreateNew={() => setCurrentView('scrapeWizard')} onRunProject={handleRunProject} onEditProject={handleEditProject} />;
       case 'scrapeWizard': return <ScraperWizardView projectToEdit={projectToEdit} onProjectSaved={() => setCurrentView('projects')} />;
-      case 'scrapeJobStatus': return <JobStatusView jobId={activeJobId} onReset={setCurrentView} onNavigateToQueue={() => setCurrentView('approvalQueue')} onNavigateToReview={(jobId) => { setActiveJobId(jobId); setCurrentView('priceReview'); }} />;
+      // case 'scrapeJobStatus': return <JobStatusView jobId={activeJobId} onReset={setCurrentView} onNavigateToQueue={() => setCurrentView('approvalQueue')} onNavigateToReview={(jobId) => { setActiveJobId(jobId); setCurrentView('priceReview'); }} onNavigateToReport={(jobId) => { setActiveJobId(jobId); setCurrentView('syncReport'); }} />;
+      case 'scrapeJobStatus': return <JobStatusView 
+        jobId={activeJobId} 
+        onReset={setCurrentView} 
+        onNavigateToQueue={() => setCurrentView('approvalQueue')} 
+        onNavigateToReview={(jobId) => { setActiveJobId(jobId); setCurrentView('priceReview'); }}
+        onNavigateToReport={(jobId) => { setActiveJobId(jobId); setCurrentView('syncReport'); }} // <-- ADD THIS PROP
+      />;
       case 'manualEditor': return <ManualEditorView onJobStarted={(jobId) => onJobStarted(jobId, 'manualEditor')} />;
       case 'priceReview': return <PriceUpdateReviewView jobId={activeJobId} onJobStarted={onJobStarted} onBack={() => setCurrentView('tools')} />;
+      case 'syncReport': return <SyncReportView jobId={activeJobId} onBack={() => setCurrentView('scrapeJobStatus')} />;
       case 'productDatabase': return <ProductDatabaseView />;
       case 'publishedPosts': return <PublishedPostsView onEditDraft={handleEditDraft} />;
       case 'allPosts': return <AllPostsView onEditDraft={handleEditDraft} />;

@@ -3,7 +3,7 @@ import json
 import time
 import math 
 import requests
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 from woocommerce import API
 from shared_state import log_terminal, redis_client
@@ -167,93 +167,76 @@ def update_product_database_task():
 @celery_app.task(bind=True)
 def update_woocommerce_products_task(self, job_id: str, approved_products: list):
     """
-    (FINAL, COMPLETE VERSION)
-    Receives approved products, processes them by action, builds the correct 
-    "External Product" payload with multi-source logic, and syncs to WooCommerce 
-    in robust, retry-able chunks.
+    (FINAL, DEBUGGED VERSION)
+    Correctly finds products using a type-safe router and syncs them.
+    Includes detailed logging for the matching process.
     """
     job_key = f"job:{job_id}"
+    audit_key = f"audit_log:{job_id}"
     log_terminal(f"--- [ROBUST SYNC - P3] Starting job {job_id} for {len(approved_products)} products. ---")
     
-    # --- Tunable Constants ---
-    CHUNK_SIZE = 25
-    MAX_API_RETRIES = 3
-    RETRY_DELAY_SECONDS = 5
-    POLITE_DELAY_SECONDS = 1
+    CHUNK_SIZE, MAX_API_RETRIES, RETRY_DELAY_SECONDS, POLITE_DELAY_SECONDS = 25, 3, 5, 1
 
-    # --- Job Status Helper ---
     def update_job_status(status, message):
-        redis_client.set(job_key, json.dumps({
-            "job_id": job_id, "status": status, "message": message
-        }), ex=3600)
+        redis_client.set(job_key, json.dumps({"job_id": job_id, "status": status, "message": message}), ex=3600)
 
     update_job_status("processing", f"Starting sync for {len(approved_products)} products...")
     
     wcapi = get_wc_api()
     if not wcapi:
         update_job_status("failed", "WooCommerce API not configured.")
-        return
+        return "Task failed: WooCommerce API not configured."
 
     try:
-        # 1. Load local DB and build lookup map
         with open(PRODUCT_DB_PATH, 'r', encoding='utf-8') as f:
             local_products = json.load(f)
         product_map_by_id = {prod['id']: prod for prod in local_products if 'id' in prod}
         
         wc_full_batch_payload = []
+        audit_log_entries = []
         today_str = datetime.now().strftime("%Y-%m-%d")
         
-        # 2. Process each approved product to build the full batch payload
+        log_terminal(f"    - DEBUG: Built product_map_by_id with {len(product_map_by_id)} integer keys.")
+
         for approved_prod in approved_products:
             action = approved_prod.get('action')
             target_db_id = None
-
-            # --- The Type-Safe "Action Router" ---
+            
             raw_id_to_find = None
             if action == 'approve':
                 raw_id_to_find = approved_prod.get('matched_db_id')
+                log_terminal(f"    - DEBUG: Action is 'approve'. Raw ID from payload: {raw_id_to_find} (type: {type(raw_id_to_find)})")
             elif action == 'link':
                 raw_id_to_find = approved_prod.get('linked_db_id')
+                log_terminal(f"    - DEBUG: Action is 'link'. Raw ID from payload: {raw_id_to_find} (type: {type(raw_id_to_find)})")
             
             if raw_id_to_find is not None:
                 try:
                     target_db_id = int(raw_id_to_find)
                 except (ValueError, TypeError):
-                    log_terminal(f"    - ⚠️ WARNING: Could not convert ID '{raw_id_to_find}' for product '{approved_prod.get('parsed_name')}'. Skipping.")
+                    log_terminal(f"    - ⚠️ WARNING: Could not convert ID '{raw_id_to_find}' to integer. Skipping.")
             
             local_prod_to_update = product_map_by_id.get(target_db_id) if target_db_id else None
+            log_terminal(f"    - DEBUG: Lookup result for integer ID {target_db_id}: {'FOUND' if local_prod_to_update else 'NOT FOUND'}")
 
             if local_prod_to_update:
-                wc_id = local_prod_to_update.get('id') 
-
-                # --- CORRECTED VARIABLE ASSIGNMENTS ---
-                new_name = approved_prod.get('parsed_name')
-                new_sale_price = approved_prod.get('new_sale_price')
-                new_regular_price = approved_prod.get('new_regular_price')
-                new_aff_link = approved_prod.get('affiliate_link')
-                new_btn_text = approved_prod.get('button_text') or "Check Price"
-                
-                # Update local DB object (in memory)
-                local_prod_to_update['name'] = new_name
-                local_prod_to_update['shopee_id'] = approved_prod.get('shopee_id')
-                local_prod_to_update['lazada_id'] = approved_prod.get('lazada_id')
-                local_prod_to_update['shop_id'] = approved_prod.get('shop_id')
-                local_prod_to_update['external_url'] = new_aff_link
-                local_prod_to_update['button_text'] = new_btn_text
-
-                # Prepare base API payload
+                wc_id = local_prod_to_update.get('id')
+                new_name, new_sale_price, new_regular_price, new_aff_link, new_btn_text = (
+                    approved_prod.get('parsed_name'), approved_prod.get('new_sale_price'),
+                    approved_prod.get('new_regular_price'), approved_prod.get('affiliate_link'),
+                    approved_prod.get('button_text') or "Check Price"
+                )
+                local_prod_to_update.update({
+                    'name': new_name, 'shopee_id': approved_prod.get('shopee_id'),
+                    'lazada_id': approved_prod.get('lazada_id'), 'shop_id': approved_prod.get('shop_id'),
+                    'external_url': new_aff_link, 'button_text': new_btn_text
+                })
                 meta_data_list = [
                     {"key": "_shopee_id", "value": str(approved_prod.get('shopee_id') or "")},
                     {"key": "_lazada_id", "value": str(approved_prod.get('lazada_id') or "")},
                     {"key": "_shop_id", "value": str(approved_prod.get('shop_id') or "")}
                 ]
-                
-                product_api_data = {
-                    "id": wc_id, "type": "external", "name": new_name,
-                    "external_url": new_aff_link, "button_text": new_btn_text, "meta_data": []
-                }
-
-                # Apply Price Logic (using correct long variable names)
+                product_api_data = {"id": wc_id, "type": "external", "name": new_name, "external_url": new_aff_link, "button_text": new_btn_text, "meta_data": []}
                 final_sale_price_str, final_reg_price_str, final_main_price_str, price_to_log = "", "", "", None
                 if new_sale_price and new_regular_price:
                     final_sale_price_str, final_reg_price_str, final_main_price_str, price_to_log = str(new_sale_price), str(new_regular_price), str(new_sale_price), new_sale_price
@@ -261,102 +244,85 @@ def update_woocommerce_products_task(self, job_id: str, approved_products: list)
                     final_reg_price_str, final_main_price_str, price_to_log = str(new_regular_price), str(new_regular_price), new_regular_price
                 elif new_sale_price:
                     final_reg_price_str, final_main_price_str, price_to_log = str(new_sale_price), str(new_sale_price), new_sale_price
-                
-                product_api_data.update({
-                    'price': final_main_price_str, 'regular_price': final_reg_price_str, 'sale_price': final_sale_price_str
-                })
-
-                # Check History & Finalize Meta-Data
+                product_api_data.update({'price': final_main_price_str, 'regular_price': final_reg_price_str, 'sale_price': final_sale_price_str})
                 current_price_str = local_prod_to_update.get('sale_price') or local_prod_to_update.get('regular_price')
                 history_json_string = json.dumps(local_prod_to_update.get('price_history', []))
-
                 current_price_float = None
                 try:
                     current_price_float = float(current_price_str)
-                except (ValueError, TypeError): pass 
-
-                if price_to_log is not None and price_to_log != current_price_float:
-                    log_terminal(f"    - ✅ PRICE CHANGE DETECTED for {new_name}: {current_price_float} -> {price_to_log}")
-                    local_prod_to_update['sale_price'] = new_sale_price
-                    local_prod_to_update['regular_price'] = new_regular_price
+                except (ValueError, TypeError): pass
+                price_changed = price_to_log is not None and price_to_log != current_price_float
+                if price_changed:
+                    local_prod_to_update.update({'sale_price': new_sale_price, 'regular_price': new_regular_price})
                     history = local_prod_to_update.get('price_history', [])
+                    if not history and current_price_float is not None:
+                        history.append({"date": (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d"), "price": current_price_float})
                     history.append({"date": today_str, "price": price_to_log})
                     local_prod_to_update['price_history'] = history
                     history_json_string = json.dumps(history)
-                
                 meta_data_list.append({"key": "_price_history", "value": history_json_string})
-                
                 product_api_data['meta_data'] = meta_data_list
+                audit_entry = {
+                    "name": new_name,
+                    "wc_id": wc_id,
+                    "status": "Price Updated" if price_changed else "Synced",
+                    "price_before": current_price_float,
+                    "price_after": price_to_log if price_changed else current_price_float,
+                    "details": "Meta-data (Shopee/Lazada ID, History, etc.) was refreshed."
+                }
+                audit_log_entries.append(audit_entry)
                 wc_full_batch_payload.append(product_api_data)
-
-        # 3. Process Chunks
+        
         if not wc_full_batch_payload:
             update_job_status("complete", "Sync complete. No products required an update.")
             return "Sync complete. No products required an update."
 
         chunks = [wc_full_batch_payload[i:i + CHUNK_SIZE] for i in range(0, len(wc_full_batch_payload), CHUNK_SIZE)]
-        total_chunks = len(chunks)
-        failed_chunks_count = 0
-        
+        total_chunks, failed_chunks_count = len(chunks), 0
         log_terminal(f"    - Starting batch sync of {len(wc_full_batch_payload)} products in {total_chunks} chunk(s) of {CHUNK_SIZE}...")
-
         for i, chunk in enumerate(chunks):
             chunk_num = i + 1
             log_terminal(f"    - Processing chunk {chunk_num}/{total_chunks}...")
             update_job_status("processing", f"Syncing chunk {chunk_num}/{total_chunks}...")
-            
             sent_successfully = False
             for attempt in range(MAX_API_RETRIES):
                 try:
-                    batch_data = {"update": chunk}
-                    response = wcapi.post("products/batch", batch_data)
+                    response = wcapi.post("products/batch", {"update": chunk})
                     response_json = response.json()
-
                     if response.status_code >= 400:
-                        log_terminal(f"    - ❌ API ERROR: Chunk {chunk_num} (Attempt {attempt + 1}) failed with Status {response.status_code}.")
-                        log_terminal(f"    - WC Response: {json.dumps(response_json)}")
+                        log_terminal(f"    - ❌ API ERROR: Chunk {chunk_num} (Attempt {attempt + 1}) failed: {json.dumps(response_json)}")
                         raise requests.exceptions.HTTPError(f"Batch update failed: {response_json.get('message', 'Unknown API Error')}", response=response)
-                    
                     log_terminal(f"    - DEBUG: WC Success Response: {json.dumps(response_json)}")
                     sent_successfully = True
                     log_terminal(f"    - ✅ Chunk {chunk_num}/{total_chunks} synced successfully.")
-                    break 
-
+                    break
                 except requests.exceptions.RequestException as e:
-                    log_terminal(f"    - ⚠️ NETWORK ERROR: Chunk {chunk_num} (Attempt {attempt + 1}/{MAX_API_RETRIES}) failed: {e}")
-                    if attempt < MAX_API_RETRIES - 1:
-                        time.sleep(RETRY_DELAY_SECONDS)
-                    else:
-                        failed_chunks_count += 1
-                
+                    log_terminal(f"    - ⚠️ NETWORK ERROR: Chunk {chunk_num} (Attempt {attempt + 1}): {e}")
+                    if attempt < MAX_API_RETRIES - 1: time.sleep(RETRY_DELAY_SECONDS)
+                    else: failed_chunks_count += 1
                 except Exception as e:
                     log_terminal(f"    - ❌ UNEXPECTED ERROR on Chunk {chunk_num} (Attempt {attempt + 1}): {e}")
-                    if attempt < MAX_API_RETRIES - 1:
-                        time.sleep(RETRY_DELAY_SECONDS)
-                    else:
-                        failed_chunks_count += 1
+                    if attempt < MAX_API_RETRIES - 1: time.sleep(RETRY_DELAY_SECONDS)
+                    else: failed_chunks_count += 1
+            if sent_successfully and total_chunks > 1: time.sleep(POLITE_DELAY_SECONDS)
 
-            if sent_successfully and total_chunks > 1:
-                time.sleep(POLITE_DELAY_SECONDS)
-        
-        # 4. Final Local DB Save
         with open(PRODUCT_DB_PATH, 'w', encoding='utf-8') as f:
             json.dump(local_products, f, indent=2, ensure_ascii=False)
         log_terminal("    - ✅ Local product_database.json saved.")
+        
+        redis_client.set(audit_key, json.dumps(audit_log_entries), ex=86400)
+        log_terminal(f"    - ✅ Audit log for job {job_id} saved to Redis.")
 
-        # 5. Final Report
         if failed_chunks_count > 0:
-            final_message = f"Sync complete with errors. {failed_chunks_count} out of {total_chunks} chunks failed."
+            final_message = f"Sync complete with errors. {failed_chunks_count} of {total_chunks} chunks failed."
             update_job_status("failed", final_message)
             raise Exception(final_message)
         else:
-            final_message = f"Successfully synced all {len(wc_full_batch_payload)} products in {total_chunks} chunks."
+            final_message = f"Successfully synced all {len(wc_full_batch_payload)} products."
             update_job_status("complete", final_message)
             return final_message
-
     except Exception as e:
         error_message = f"A critical, unhandled error occurred: {e}"
-        log_terminal(f"❌ [ROBUST SYNC - P3] {error_message}")
         update_job_status("failed", str(e))
         raise e
 

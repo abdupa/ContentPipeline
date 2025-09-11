@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Loader2, CheckCircle, XCircle, FileDown, Info, CheckSquare, Download, GitPullRequest } from 'lucide-react';
 import apiClient from '../apiClient';
 
-const JobStatusView = ({ jobId, onReset, onNavigateToQueue, onNavigateToReview }) => {
+const JobStatusView = ({ jobId, onReset, onNavigateToQueue, onNavigateToReview, onNavigateToReport }) => {
+// const JobStatusView = ({ jobId, onReset, onNavigateToQueue, onNavigateToReview }) => {
   const [jobData, setJobData] = useState(null);
   const [error, setError] = useState(null);
   const intervalRef = useRef(null);
@@ -65,12 +66,14 @@ const JobStatusView = ({ jobId, onReset, onNavigateToQueue, onNavigateToReview }
                     ? "Import complete. Products are staged for review."
                     : jobId.includes('inspect')
                       ? "Site inspection complete."
+                      : jobId.includes('wcsync') // Added a message for sync jobs
+                      ? "Sync to WooCommerce complete."
                       : `Job Complete!`
                   }
                 </span>
             </div>
             
-            {/* This logic now correctly shows the button for each job type */}
+            {/* --- THIS IS THE SINGLE, CORRECT LOGIC BLOCK --- */}
             {jobId.includes('import') ? (
                 <button onClick={() => onNavigateToReview(jobId)} className="px-4 py-2 bg-purple-600 text-white font-semibold rounded-md hover:bg-purple-700 flex items-center gap-2">
                     <GitPullRequest className="w-5 h-5"/> Review Staged Updates
@@ -79,7 +82,12 @@ const JobStatusView = ({ jobId, onReset, onNavigateToQueue, onNavigateToReview }
                 <button onClick={handleDownloadCsv} className="px-4 py-2 bg-blue-600 text-white font-semibold rounded-md hover:bg-blue-700 flex items-center gap-2">
                     <Download className="w-5 h-5"/> Download Inspection CSV
                 </button>
+            ) : jobId.includes('wcsync') ? ( // <-- Your new condition is correct
+                <button onClick={() => onNavigateToReport(jobId)} className="px-4 py-2 bg-indigo-600 text-white font-semibold rounded-md hover:bg-indigo-700 flex items-center gap-2">
+                    <FileDown className="w-5 h-5"/> View Sync Report
+                </button>
             ) : (
+                // This is the default fallback for other job types
                 <button onClick={onNavigateToQueue} className="px-4 py-2 bg-green-600 text-white font-semibold rounded-md hover:bg-green-700 flex items-center gap-2">
                     <CheckSquare className="w-5 h-5"/> View Drafts in Approval Queue
                 </button>

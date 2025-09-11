@@ -1433,118 +1433,118 @@ def import_from_google_sheet_task(self, job_id: str, sheet_url: str, source: str
         log_terminal(f"❌ [IMPORTER] FAILED for job {job_id}. Error: {e}")
         raise e
 
-@celery_app.task(bind=True)
-def update_woocommerce_products_task(self, job_id: str, approved_products: list):
-    """
-    Receives a list of approved product data and updates product_database.json
-    and the live WooCommerce store.
-    """
-    job_key = f"job:{job_id}"
-    log_terminal(f"--- [PHASE 3 SYNC] Starting job {job_id} ---")
-    log_terminal(f"    - Received {len(approved_products)} approved products to sync.")
-    redis_client.set(job_key, json.dumps({"job_id": job_id, "status": "processing", "message": f"Starting sync for {len(approved_products)} products..."}), ex=3600)
+# @celery_app.task(bind=True)
+# def update_woocommerce_products_task(self, job_id: str, approved_products: list):
+#     """
+#     Receives a list of approved product data and updates product_database.json
+#     and the live WooCommerce store.
+#     """
+#     job_key = f"job:{job_id}"
+#     log_terminal(f"--- [PHASE 3 SYNC] Starting job {job_id} ---")
+#     log_terminal(f"    - Received {len(approved_products)} approved products to sync.")
+#     redis_client.set(job_key, json.dumps({"job_id": job_id, "status": "processing", "message": f"Starting sync for {len(approved_products)} products..."}), ex=3600)
 
-    wcapi = get_wc_api()
-    if not wcapi:
-        redis_client.set(job_key, json.dumps({"job_id": job_id, "status": "failed", "error": "WooCommerce API not configured."}), ex=3600)
-        return
+#     wcapi = get_wc_api()
+#     if not wcapi:
+#         redis_client.set(job_key, json.dumps({"job_id": job_id, "status": "failed", "error": "WooCommerce API not configured."}), ex=3600)
+#         return
 
-    try:
-        # 1. Load local product database into memory
-        with open(PRODUCT_DB_PATH, 'r', encoding='utf-8') as f:
-            local_products = json.load(f)
+#     try:
+#         # 1. Load local product database into memory
+#         with open(PRODUCT_DB_PATH, 'r', encoding='utf-8') as f:
+#             local_products = json.load(f)
         
-        # 2. Create a lookup map by SLUG for efficient updates.
-        #    We use slug as the key because it's the unique identifier our Phase 1 task
-        #    and Phase 2 UI are both using to link the sheet data to the DB data.
-        product_map_by_slug = {prod['slug']: prod for prod in local_products if 'slug' in prod}
+#         # 2. Create a lookup map by SLUG for efficient updates.
+#         #    We use slug as the key because it's the unique identifier our Phase 1 task
+#         #    and Phase 2 UI are both using to link the sheet data to the DB data.
+#         product_map_by_slug = {prod['slug']: prod for prod in local_products if 'slug' in prod}
         
-        wc_batch_payload = []
-        updated_local_count = 0
+#         wc_batch_payload = []
+#         updated_local_count = 0
         
-        # 3. Process each approved product
-        for approved_prod in approved_products:
-            slug = approved_prod.get('slug')
-            local_prod_to_update = product_map_by_slug.get(slug)
+#         # 3. Process each approved product
+#         for approved_prod in approved_products:
+#             slug = approved_prod.get('slug')
+#             local_prod_to_update = product_map_by_slug.get(slug)
             
-            # We only process if the product exists in our local DB (it's a "MATCHED" item)
-            # Logic for "Create as New" would go in an 'else' block, but we're focusing on price updates.
-            if local_prod_to_update:
-                wc_id = local_prod_to_update.get('id')
-                if not wc_id:
-                    continue # Skip if our local product doesn't have a WC ID
+#             # We only process if the product exists in our local DB (it's a "MATCHED" item)
+#             # Logic for "Create as New" would go in an 'else' block, but we're focusing on price updates.
+#             if local_prod_to_update:
+#                 wc_id = local_prod_to_update.get('id')
+#                 if not wc_id:
+#                     continue # Skip if our local product doesn't have a WC ID
 
-                # --- A. Update the local DB product (in memory) ---
-                local_prod_to_update['name'] = approved_prod['parsed_name'] # Sync any name edits
-                local_prod_to_update['sale_price'] = approved_prod['new_sale_price']
-                local_prod_to_update['regular_price'] = approved_prod['new_old_price'] # Update this if it's provided
+#                 # --- A. Update the local DB product (in memory) ---
+#                 local_prod_to_update['name'] = approved_prod['parsed_name'] # Sync any name edits
+#                 local_prod_to_update['sale_price'] = approved_prod['new_sale_price']
+#                 local_prod_to_update['regular_price'] = approved_prod['new_old_price'] # Update this if it's provided
                 
-                # Enrich our DB with the new IDs from the sheet!
-                if approved_prod.get('shopee_id'):
-                    local_prod_to_update['shopee_id'] = approved_prod['shopee_id']
-                if approved_prod.get('lazada_id'):
-                    local_prod_to_update['lazada_id'] = approved_prod['lazada_id']
-                if approved_prod.get('shop_id'):
-                    local_prod_to_update['shop_id'] = approved_prod['shop_id']
+#                 # Enrich our DB with the new IDs from the sheet!
+#                 if approved_prod.get('shopee_id'):
+#                     local_prod_to_update['shopee_id'] = approved_prod['shopee_id']
+#                 if approved_prod.get('lazada_id'):
+#                     local_prod_to_update['lazada_id'] = approved_prod['lazada_id']
+#                 if approved_prod.get('shop_id'):
+#                     local_prod_to_update['shop_id'] = approved_prod['shop_id']
                 
-                updated_local_count += 1
+#                 updated_local_count += 1
 
-                # --- B. Prepare the WooCommerce Batch Update Payload ---
-                meta_data_list = [
-                    {"key": "_shopee_id", "value": str(approved_prod.get('shopee_id') or "")},
-                    {"key": "_lazada_id", "value": str(approved_prod.get('lazada_id') or "")},
-                    {"key": "_shop_id", "value": str(approved_prod.get('shop_id') or "")}
-                ]
+#                 # --- B. Prepare the WooCommerce Batch Update Payload ---
+#                 meta_data_list = [
+#                     {"key": "_shopee_id", "value": str(approved_prod.get('shopee_id') or "")},
+#                     {"key": "_lazada_id", "value": str(approved_prod.get('lazada_id') or "")},
+#                     {"key": "_shop_id", "value": str(approved_prod.get('shop_id') or "")}
+#                 ]
                 
-                product_api_data = {
-                    "id": wc_id,
-                    "name": approved_prod['parsed_name'],
-                    "sale_price": str(approved_prod.get('new_sale_price') or ""),
-                    "meta_data": meta_data_list
-                }
+#                 product_api_data = {
+#                     "id": wc_id,
+#                     "name": approved_prod['parsed_name'],
+#                     "sale_price": str(approved_prod.get('new_sale_price') or ""),
+#                     "meta_data": meta_data_list
+#                 }
                 
-                # Set regular_price only if we have one
-                if approved_prod.get('new_old_price'):
-                     product_api_data['regular_price'] = str(approved_prod['new_old_price'])
+#                 # Set regular_price only if we have one
+#                 if approved_prod.get('new_old_price'):
+#                      product_api_data['regular_price'] = str(approved_prod['new_old_price'])
 
-                wc_batch_payload.append(product_api_data)
+#                 wc_batch_payload.append(product_api_data)
 
-        # 4. Execute the syncs (if there's anything to update)
-        if not wc_batch_payload:
-            log_terminal("    - No matched products found to update. Task complete.")
-            redis_client.set(job_key, json.dumps({"job_id": job_id, "status": "complete", "message": "Sync complete. No matched products required an update."}), ex=3600)
-            return
+#         # 4. Execute the syncs (if there's anything to update)
+#         if not wc_batch_payload:
+#             log_terminal("    - No matched products found to update. Task complete.")
+#             redis_client.set(job_key, json.dumps({"job_id": job_id, "status": "complete", "message": "Sync complete. No matched products required an update."}), ex=3600)
+#             return
 
-        # --- SYNC 1: Live WooCommerce Update (Batch) ---
-        log_terminal(f"    - Syncing {len(wc_batch_payload)} products to WooCommerce via BATCH update...")
-        redis_client.set(job_key, json.dumps({"job_id": job_id, "status": "processing", "message": f"Syncing {len(wc_batch_payload)} products to WooCommerce..."}), ex=3600)
+#         # --- SYNC 1: Live WooCommerce Update (Batch) ---
+#         log_terminal(f"    - Syncing {len(wc_batch_payload)} products to WooCommerce via BATCH update...")
+#         redis_client.set(job_key, json.dumps({"job_id": job_id, "status": "processing", "message": f"Syncing {len(wc_batch_payload)} products to WooCommerce..."}), ex=3600)
         
-        batch_data = {"update": wc_batch_payload}
-        wc_response = wcapi.post("products/batch", batch_data).json()
+#         batch_data = {"update": wc_batch_payload}
+#         wc_response = wcapi.post("products/batch", batch_data).json()
         
-        if "update" not in wc_response:
-            raise Exception(f"WooCommerce batch update failed. Response: {wc_response}")
+#         if "update" not in wc_response:
+#             raise Exception(f"WooCommerce batch update failed. Response: {wc_response}")
 
-        log_terminal("    - ✅ WooCommerce batch update successful.")
+#         log_terminal("    - ✅ WooCommerce batch update successful.")
 
-        # --- SYNC 2: Local Database File Update ---
-        log_terminal(f"    - Syncing {updated_local_count} updates to local product_database.json...")
-        # We write the entire modified product list back to the file
-        with open(PRODUCT_DB_PATH, 'w', encoding='utf-8') as f:
-            json.dump(local_products, f, indent=2, ensure_ascii=False)
-        log_terminal("    - ✅ Local product_database.json saved.")
+#         # --- SYNC 2: Local Database File Update ---
+#         log_terminal(f"    - Syncing {updated_local_count} updates to local product_database.json...")
+#         # We write the entire modified product list back to the file
+#         with open(PRODUCT_DB_PATH, 'w', encoding='utf-8') as f:
+#             json.dump(local_products, f, indent=2, ensure_ascii=False)
+#         log_terminal("    - ✅ Local product_database.json saved.")
 
-        # 5. Mark job as complete
-        final_message = f"Successfully synced {len(wc_batch_payload)} products to WooCommerce and local DB."
-        redis_client.set(job_key, json.dumps({"job_id": job_id, "status": "complete", "message": final_message}), ex=3600)
-        log_terminal(f"✅ [PHASE 3 SYNC] Job {job_id} complete. {final_message}")
+#         # 5. Mark job as complete
+#         final_message = f"Successfully synced {len(wc_batch_payload)} products to WooCommerce and local DB."
+#         redis_client.set(job_key, json.dumps({"job_id": job_id, "status": "complete", "message": final_message}), ex=3600)
+#         log_terminal(f"✅ [PHASE 3 SYNC] Job {job_id} complete. {final_message}")
     
-    except Exception as e:
-        error_message = f"❌ [PHASE 3 SYNC] A critical error occurred: {e}"
-        log_terminal(error_message)
-        redis_client.set(job_key, json.dumps({"job_id": job_id, "status": "failed", "error": error_message}), ex=3600)
-        # Re-raise the exception to make Celery mark the task as FAILED
-        raise e
+#     except Exception as e:
+#         error_message = f"❌ [PHASE 3 SYNC] A critical error occurred: {e}"
+#         log_terminal(error_message)
+#         redis_client.set(job_key, json.dumps({"job_id": job_id, "status": "failed", "error": error_message}), ex=3600)
+#         # Re-raise the exception to make Celery mark the task as FAILED
+#         raise e
 
 @celery_app.task(bind=True)
 def migrate_product_database_task(self):

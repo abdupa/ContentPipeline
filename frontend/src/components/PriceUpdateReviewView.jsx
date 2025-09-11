@@ -241,8 +241,8 @@ const PriceUpdateReviewView = ({ jobId, onJobStarted, onBack }) => {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
-            {stagedProducts.map(product => (
-              <tr key={product.slug} className={`${product.status === 'MATCHED' ? 'bg-white' : 'bg-blue-50'} relative`}>
+            {stagedProducts.map((product, index) => (
+              <tr key={`${product.slug}-${index}`} className={`${product.status === 'MATCHED' ? 'bg-white' : 'bg-blue-50'} relative`}>
                 <td className="p-4">
                   {product.status === 'MATCHED' ? (
                     <label className="flex items-center space-x-2 cursor-pointer">

@@ -1428,28 +1428,6 @@ async def run_shopee_importer():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# @app.post("/api/import/run-shopee-importer", response_model=JobCreationResponse)
-# async def run_shopee_importer():
-#     """Kicks off the importer task for the hardcoded Shopee Google Sheet."""
-#     log_terminal("--- HIT: POST /api/import/run-shopee-importer ---")
-#     try:
-#         from tasks import import_from_google_sheet_task
-        
-#         sheet_url = os.getenv("SHOPEE_SHEET_URL")
-#         if not sheet_url:
-#             raise HTTPException(status_code=500, detail="SHOPEE_SHEET_URL not set in .env file.")
-
-#         job_id = f"import_shopee_{uuid.uuid4().hex[:8]}"
-
-#         # --- FIX: Create the initial job status record immediately ---
-#         job_status = { "job_id": job_id, "status": "starting", "message": "Queuing Shopee import task..." }
-#         redis_client.set(f"job:{job_id}", json.dumps(job_status), ex=3600)
-        
-#         import_from_google_sheet_task.delay(job_id, sheet_url, 'shopee')
-        
-#         return {"job_id": job_id}
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/import/run-lazada-importer", response_model=JobCreationResponse)
 async def run_lazada_importer():
@@ -1473,3 +1451,16 @@ async def run_lazada_importer():
             return {"job_id": job_id}
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
+        
+@app.get("/api/audit/log/{job_id}", response_model=List[Dict[str, Any]])
+async def get_audit_log(job_id: str):
+    """Fetches the detailed audit log for a completed sync job."""
+    log_terminal(f"--- HIT: GET /api/audit/log/{job_id} ---")
+    audit_key = f"audit_log:{job_id}"
+    
+    audit_json = redis_client.get(audit_key)
+    if not audit_json:
+        # Return an empty list if the log is not found, to prevent frontend errors
+        return [] 
+        
+    return json.loads(audit_json)
