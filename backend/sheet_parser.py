@@ -1,8 +1,13 @@
+import os
 import re
 import unicodedata
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, urlunparse
 import secrets
 import string
+from itertools import islice
+import random
+from shared_state import log_terminal
+
 
 
 def slugify(value):
@@ -79,6 +84,107 @@ def clean_product_name(raw):
 
     return raw.strip()
 
+def extract_prices_shopee(raw_text: str):
+    """
+    (FINAL, ROBUST SHOPEE VERSION)
+    Correctly handles all 3 scenarios for Shopee data:
+    1. Two explicit prices are found.
+    2. One price and a discount percentage are found.
+    3. Only one price with no discount is found.
+    """
+    if not raw_text or not isinstance(raw_text, str):
+        return None, None
+
+    # Pattern for prices explicitly prefixed by a '₱' symbol.
+    price_pattern = r"₱\s*([\d,]+\.?\d*)"
+    # Pattern for discount percentage like "-27%"
+    discount_pattern = r"-(\d{1,2})%"
+
+    try:
+        amounts = sorted([
+            float(price.replace(",", ""))
+            for price in re.findall(price_pattern, raw_text)
+        ])
+        discount_match = re.search(discount_pattern, raw_text)
+
+        sale_price = None
+        regular_price = None
+
+        if len(amounts) >= 2:
+            # Scenario 1: Two explicit prices found (e.g., "₱10,000 ₱12,000").
+            sale_price = amounts[0]
+            regular_price = amounts[-1]
+
+        elif len(amounts) == 1 and discount_match:
+            # Scenario 2: One price and a discount found (e.g., "₱23,000-27%").
+            # The found price is the SALE price.
+            sale_price = amounts[0]
+            discount_percentage = float(discount_match.group(1)) / 100
+            if 0 < discount_percentage < 1:
+                # Calculate the original price from the sale price and discount
+                regular_price = round(sale_price / (1 - discount_percentage), 2)
+        
+        elif len(amounts) == 1:
+            # Scenario 3: Only one price and NO discount was found.
+            # The found price is the REGULAR price.
+            sale_price = None
+            regular_price = amounts[0]
+
+        return sale_price, regular_price
+
+    except Exception:
+        # Fail gracefully on any parsing error
+        return None, None
+
+# def extract_prices_shopee(raw_text: str):
+#     """
+#     (FINAL, ROBUST SHOPEE VERSION)
+#     Correctly handles all 3 scenarios:
+#     1. Two explicit prices are found.
+#     2. One price and a discount percentage are found.
+#     3. Only one price with no discount is found.
+#     """
+#     if not raw_text or not isinstance(raw_text, str):
+#         return None, None
+
+#     # Pattern for 4+ digit numbers, with or without ₱
+#     price_pattern = r"₱?\s*([\d,]{4,8})(?!\d)"
+#     # Pattern for discount percentage like "-27%"
+#     discount_pattern = r"-(\d{1,2})%"
+
+#     try:
+#         amounts = sorted([float(p.replace(",", "")) for p in re.findall(price_pattern, raw_text)])
+#         discount_match = re.search(discount_pattern, raw_text)
+
+#         sale_price = None
+#         regular_price = None
+
+#         if len(amounts) >= 2:
+#             # Scenario 1: Two explicit prices found (e.g., "₱10,000 ₱12,000").
+#             sale_price = amounts[0]
+#             regular_price = amounts[-1]
+
+#         elif len(amounts) == 1 and discount_match:
+#             # Scenario 2: One price and a discount found (e.g., "₱23,000-27%").
+#             # The found price is the SALE price.
+#             sale_price = amounts[0]
+#             discount_percentage = float(discount_match.group(1)) / 100
+#             if 0 < discount_percentage < 1:
+#                 # Calculate the original price from the sale price and discount
+#                 regular_price = round(sale_price / (1 - discount_percentage), 2)
+        
+#         elif len(amounts) == 1:
+#             # Scenario 3: Only one price and NO discount was found.
+#             # The found price is the REGULAR price.
+#             sale_price = None
+#             regular_price = amounts[0]
+
+#         return sale_price, regular_price
+
+#     except Exception:
+#         # Fail gracefully on any parsing error
+#         return None, None
+
 def extract_prices(raw_text: str):
     """
     (Robust Version)
@@ -145,44 +251,101 @@ def generate_uls_trackid(length: int = 12) -> str:
     alphabet = string.ascii_lowercase + string.digits
     return ''.join(secrets.choice(alphabet) for _ in range(length))
 
-def convert_to_affiliate_link(
-    url: str,
-    product_slug: str = "",
-    campaign_id: str = "id_HURtY6Geqq",  # <-- replace with your real Shopee campaign ID
-    source_id: str = "an_13327880016",   # <-- your affiliate source ID
-    term: str | None = None
-) -> str | None:
+# --- NEW: Affiliate Link Generation Helpers (Your Code) ---
+def _rand_lower_alnum(n: int) -> str:
+    """Return n chars of [a-z0-9] using cryptographically secure randomness."""
+    alphabet = string.ascii_lowercase + string.digits
+    return ''.join(secrets.choice(alphabet) for _ in range(n))
+
+def generate_shopee_trackid(length: int = 12) -> str:
+    """Generates a Shopee-style uls_trackid."""
+    return _rand_lower_alnum(length)
+
+def generate_lazada_click_id(prefix: str = "clk") -> str:
+    """Lazada-style click ID (mkttid)."""
+    total_length = random.choice([20, 21])
+    return prefix + _rand_lower_alnum(total_length - len(prefix))
+
+# --- FINAL, MULTI-SOURCE CONVERTER ---
+def convert_to_affiliate_link(url: str, product_slug: str) -> str:
     """
-    Convert a Shopee product URL into a clean affiliate link.
-    - Strips any old tracking/query params.
-    - Inserts a fresh uls_trackid and fixed utm_campaign each time.
-    - Passes through non-Shopee URLs unchanged.
+    (FINAL, ROBUST VERSION)
+    Converts a Shopee or Lazada product URL into a clean affiliate link,
+    stripping any old tracking params and applying the correct new ones.
     """
     if not url:
         return None
 
-    if 'shopee.ph' not in str(url):
-        return url
-
-    # 1. Strip existing query parameters
+    # 1. Get the "clean" base URL by stripping all existing query parameters.
     base_url = url.split('?')[0]
+    
+    # --- 2. Router: Apply the correct parameters based on the source ---
+    
+    if 'shopee.ph' in str(url):
+        our_params = (
+            f"?uls_trackid={generate_shopee_trackid()}"
+            f"&utm_campaign=id_HURtY6Geqq" # Your Shopee Campaign ID
+            f"&utm_content=----"
+            f"&utm_medium=affiliates"
+            f"&utm_source=an_13327880016"  # Your Shopee Source ID
+        )
+        return base_url + our_params
 
-    # 2. Generate Shopee-style tracking ID
-    tracking_token = generate_uls_trackid()
+    elif 'lazada.com.ph' in str(url):
+        lazada_pid = os.getenv("LAZADA_AFFILIATE_PID")
+        if not lazada_pid:
+            # If PID is not set, we cannot generate a valid link. Return the clean URL.
+            return base_url
 
-    # 3. Build affiliate parameters
-    params = (
-        f"?uls_trackid={tracking_token}"
-        f"&utm_campaign={campaign_id}"
-        f"&utm_content=----"
-        f"&utm_medium=affiliates"
-        f"&utm_source={source_id}"
-    )
-    if term:
-        params += f"&utm_term={term}"
+        click_id = generate_lazada_click_id()
+        our_params = (
+            f"?laz_trackid=2:{lazada_pid}:{click_id}"
+            f"&mkttid={click_id}"
+        )
+        return base_url + our_params
+    
+    else:
+        # If it's not a known source, return the clean base URL
+        return base_url
 
-    # 4. Return final link
-    return base_url + params
+# def convert_to_affiliate_link(
+#     url: str,
+#     product_slug: str = "",
+#     campaign_id: str = "id_HURtY6Geqq",  # <-- replace with your real Shopee campaign ID
+#     source_id: str = "an_13327880016",   # <-- your affiliate source ID
+#     term: str | None = None
+#     ) -> str | None:
+#     """
+#     Convert a Shopee product URL into a clean affiliate link.
+#     - Strips any old tracking/query params.
+#     - Inserts a fresh uls_trackid and fixed utm_campaign each time.
+#     - Passes through non-Shopee URLs unchanged.
+#     """
+#     if not url:
+#         return None
+
+#     if 'shopee.ph' not in str(url):
+#         return url
+
+#     # 1. Strip existing query parameters
+#     base_url = url.split('?')[0]
+
+#     # 2. Generate Shopee-style tracking ID
+#     tracking_token = generate_uls_trackid()
+
+#     # 3. Build affiliate parameters
+#     params = (
+#         f"?uls_trackid={tracking_token}"
+#         f"&utm_campaign={campaign_id}"
+#         f"&utm_content=----"
+#         f"&utm_medium=affiliates"
+#         f"&utm_source={source_id}"
+#     )
+#     if term:
+#         params += f"&utm_term={term}"
+
+#     # 4. Return final link
+#     return base_url + params
 
 def parse_ecommerce_url(url):
     """
@@ -203,7 +366,7 @@ def parse_ecommerce_url(url):
     
     # Lazada Logic: ...name-sPRODUCT_ID.html... OR ...?shop_id=...
     if 'lazada' in str(hostname):
-        match = re.search(r'-s(\d+)\.html', url)
+        match = re.search(r'-i(\d+)\.html', url)
         product_id = match.group(1) if match else None
         
         query_params = parse_qs(urlparse(url).query)
@@ -214,26 +377,87 @@ def parse_ecommerce_url(url):
 
     return {'product_id': None, 'shop_id': None, 'source': None}
 
-# def convert_to_affiliate_link(url, product_slug, tracking_token='d4uxpm5eb2rd', campaign_id='id_DefaultCampaign'):
-#     if not url:
-#         return None
-    
-#     # Per our plan, we only modify Shopee links. All others (Lazada, etc.) pass through untouched.
-#     if 'shopee.ph' not in str(url):
-#         return url
+# --- NEW: LAZADA-SPECIFIC PARSERS ---
+def clean_product_name_lazada(first_line_text: str) -> str:
+    """
+    (FINAL, ROBUST VERSION)
+    This function first isolates the product name from sales "noise" (like specs,
+    battery info, etc.), and THEN runs the keyword cleaner on the result.
+    It's designed to handle the specific format of the Lazada sheet.
+    """
+    if not isinstance(first_line_text, str):
+        return ""
 
-#     # 1. Get the "clean" base URL by splitting at the FIRST '?' and taking only the part before it.
-#     # This strips ALL existing query parameters (like gads_t_sig=, old utm_source, etc.)
-#     base_url = url.split('?')[0]
+    # --- STAGE 1: PRE-CLEANUP ---
+    # Remove all types of bracketed text first, including full-width brackets
+    name_part = re.sub(r'\[.*?\]', '', first_line_text)
+    name_part = re.sub(r'\(.*?\)', '', name_part)
+    name_part = re.sub(r'【.*?】', '', name_part)
 
-#     # 2. Build our new, correct affiliate parameter string
-#     our_params = (
-#         f"?uls_trackid={tracking_token}"
-#         f"&utm_campaign={campaign_id}"
-#         f"&utm_content=----"
-#         f"&utm_medium=affiliates"
-#         f"&utm_source=an_13327880016"
-#     )
+    # --- STAGE 2: THE "NOISE ISOLATOR" ---
+    # Find the *first occurrence* of a spec or noise keyword and chop the string there.
+    # This handles both cases with the '丨' separator and those without.
+    stop_pattern = re.compile(r'(丨|\d{4,5}mAh|\d+W Fast Charge|IP\d+)', re.IGNORECASE)
+    match = stop_pattern.search(name_part)
+    if match:
+        # If we find noise, chop the string off right before it starts
+        name_part = name_part[:match.start()]
+
+    # --- STAGE 3: FINAL KEYWORD CLEANUP ---
+    # Now, run a final cleanup on the isolated name to remove generic words.
+    generic_keywords = r'\b(cellphone|phone|smartphone)\b'
+    name_part = re.sub(generic_keywords, '', name_part, flags=re.IGNORECASE)
     
-#     # 3. Combine them. This guarantees we replace all old tracking data with our own.
-#     return base_url + our_params
+    # Final whitespace trim
+    return name_part.strip()
+
+def extract_prices_lazada(price_lines: list) -> tuple:
+    """
+    (Smarter Version)
+    Extracts sale and regular price from a list of 2-3 text lines
+    from the Lazada sheet by identifying which lines contain extra text.
+    """
+    sale_price = None
+    regular_price = None
+
+    price_pattern = r"([\d,]+\.?\d*)"
+    
+    # --- FIX 1: Only look at lines that actually contain a price symbol ---
+    candidate_lines = [line for line in price_lines if '₱' in line]
+    
+    for line in candidate_lines:
+        match = re.search(price_pattern, line)
+        if not match:
+            continue
+        
+        price_val = float(match.group(1).replace(",", ""))
+        
+        # --- FIX 2: Check if the line contains significant text besides the price ---
+        # We strip the price, symbol, and whitespace to see what's left.
+        text_part = re.sub(r"₱?\s*[\d,]+\.?\d*", "", line).strip()
+        
+        # If there are more than 2 characters of leftover text (like "Voucher..."), it's the regular price.
+        if len(text_part) > 2:  
+            regular_price = price_val
+        else: # Otherwise, the line is basically just the price, so it's the sale price.
+            sale_price = price_val
+            
+    # Final sanity check: If for some reason regular price is less than sale price, swap them.
+    if regular_price and sale_price and regular_price < sale_price:
+        sale_price, regular_price = regular_price, sale_price
+
+    # This handles our "single price" logic from before. If only a regular price is found,
+    # it means the item is not on sale.
+    if regular_price and not sale_price:
+        # Check if the text implies a discount. If not, it's a regular price item.
+        has_discount_text = any("%" in line or "Voucher" in line.title() for line in candidate_lines)
+        if not has_discount_text:
+            # This was a single, non-sale price.
+            # sale_price should be None. regular_price is correct.
+            pass
+        else:
+            # This was likely a sale price that we miscategorized.
+            sale_price = regular_price
+            regular_price = None
+            
+    return sale_price, regular_price

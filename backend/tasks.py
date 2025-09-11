@@ -22,10 +22,12 @@ from celery.exceptions import Ignore
 from celery import chain
 from data_tasks import update_woocommerce_products_task
 from google_sheets import get_sheets_service, fetch_sheet_grid
-from sheet_parser import clean_product_name, extract_prices, extract_hyperlink_from_cell, slugify, convert_to_affiliate_link, parse_ecommerce_url
+from sheet_parser import clean_product_name, extract_prices, extract_hyperlink_from_cell, slugify, convert_to_affiliate_link, parse_ecommerce_url, extract_prices_shopee, extract_prices_lazada, clean_product_name_lazada
 import pandas as pd
 from thefuzz import process as fuzz_process, fuzz
 from woocommerce import API as WooAPI
+from itertools import islice
+
 
 
 from celery_app import app as celery_app
@@ -1293,183 +1295,142 @@ def run_mcp_scrape_task(self, job_id: str, project_data: dict):
     update_woocommerce_products_task.delay(scraped_products)
 
 @celery_app.task(bind=True)
-def import_from_google_sheet_task(self, job_id: str, sheet_url: str):
+def import_from_google_sheet_task(self, job_id: str, sheet_url: str, source: str):
     """
-    (FINAL, COMPLETE VERSION)
-    Loads fresh DB, runs Tier-1 (ID) Match, Tier-2 (Name) Match,
-    finds one best guess, and stages all data for the External Product workflow.
+    (FINAL, SOURCE-AWARE VERSION)
+    Connects to a Google Sheet and intelligently calls the correct parser
+    (Shopee or Lazada) based on the `source` parameter.
     """
     job_key = f"job:{job_id}"
     result_key = f"staging_area:{job_id}"
-    log_terminal(f"--- [GOLDEN KEY IMPORTER] Starting job {job_id} ---")
-    redis_client.set(job_key, json.dumps({"job_id": job_id, "status": "processing", "message": "Starting new importer..."}))
-
+    log_terminal(f"--- [IMPORTER] Starting job {job_id} for source: {source.upper()} ---")
+    
     try:
-        # --- 1. LOAD FRESH DATABASE (Fixes Stale Cache Bug) ---
+        # --- 1. Load Fresh DB ---
         product_database = []
         try:
             with open(PRODUCT_DB_PATH, 'r', encoding='utf-8') as f:
                 product_database = json.load(f)
-            log_terminal(f"    - (Importer) Loaded fresh product DB with {len(product_database)} items.")
-        except Exception as e:
-            log_terminal(f"    - ⚠️ (Importer) WARNING: Could not load {PRODUCT_DB_PATH}: {e}")
+        except Exception: pass
         
-        # --- 2. Fetch Data from Google Sheets ---
+        # --- 2. Build Lookup Maps ---
+        shopee_id_map, lazada_id_map, name_map, all_product_names = {}, {}, {}, []
+        for prod in product_database:
+            if prod.get('shopee_id'): shopee_id_map[str(prod['shopee_id'])] = prod
+            if prod.get('lazada_id'): lazada_id_map[str(prod['lazada_id'])] = prod
+            if prod.get('name'):
+                name_map[prod['name'].lower()] = prod
+                all_product_names.append(prod['name'])
+        
+        # --- 3. Fetch Grid Data from Google Sheets API ---
         match = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", sheet_url)
-        if not match: raise ValueError("Invalid Spreadsheet ID.")
         spreadsheet_id = match.group(1)
         gid_match = re.search(r"[#&]gid=([0-9]+)", sheet_url)
-        if not gid_match: raise ValueError("Invalid Sheet GID.")
         sheet_gid = gid_match.group(1)
         
         service = get_sheets_service()
         sheet_metadata = service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
-        sheet = next((s for s in sheet_metadata.get('sheets', []) if s['properties']['sheetId'] == int(sheet_gid)), None)
-        if not sheet: raise ValueError(f"Sheet with GID {sheet_gid} not found.")
-        sheet_name = sheet['properties']['title']
+        sheet = next((s for s in sheet_metadata['sheets'] if s['properties']['sheetId'] == int(sheet_gid)), None)
+        grid_data = fetch_sheet_grid(spreadsheet_id, sheet['properties']['title'])
 
-        grid_data = fetch_sheet_grid(spreadsheet_id, sheet_name)
-        log_terminal(f"    - Fetched {len(grid_data)} rows from sheet '{sheet_name}'.")
-
-        # --- 3. Build "Golden Key" Lookup Maps from FRESH Database ---
-        shopee_id_map = {}
-        lazada_id_map = {}
-        name_map = {}
-        all_product_names = [] 
-
-        for prod in product_database:
-            if prod.get('shopee_id'):
-                shopee_id_map[str(prod['shopee_id'])] = prod
-            if prod.get('lazada_id'):
-                lazada_id_map[str(prod['lazada_id'])] = prod
-            if prod.get('name'):
-                name_map[prod['name'].lower()] = prod
-                all_product_names.append(prod['name'])
-
-        log_terminal(f"    - Built lookup maps: {len(shopee_id_map)} Shopee IDs, {len(lazada_id_map)} Lazada IDs, {len(name_map)} Names.")
-        log_terminal(f"    - DEBUG: Shopee ID Map Keys FOUND IN DB: {list(shopee_id_map.keys())}")
         staged_products = []
-
-        # --- 4. Process Each Row with Full Logic ---
-        for row in grid_data:
-            vals = row.get("values", [])
-            if not vals or not vals[0].get("formattedValue"): continue
-
-            raw_text, url = extract_hyperlink_from_cell(vals[0])
-            if not url: continue
-
-            # Parse all data from Sheet using our new parsers
-            cleaned_name = clean_product_name(raw_text)
-            slug = slugify(cleaned_name)
-            new_sale_price, new_regular_price = extract_prices(raw_text)
-            affiliate_link = convert_to_affiliate_link(url, slug)
-            ids = parse_ecommerce_url(url)
-            sheet_prod_id = ids.get('product_id')
-            sheet_shop_id = ids.get('shop_id')
-            source = ids.get('source')
-
-            button_text = None
-            if source == 'shopee':
-                button_text = "Buy on Shopee"
-            elif source == 'lazada':
-                button_text = "Buy on Lazada"
-
-            # --- 5. Perform Full Two-Tiered Matching Logic ---
-            match = None
-            status = "UNMATCHED"
-            tier_1_match_success = False
-            
-            # Step 1: Match by Product ID (The Golden Key)
-            if sheet_prod_id:
-                if source == 'shopee':
-                    log_terminal(f"    - DEBUG: Tier-1 Check: Looking for Sheet_Prod_ID '{sheet_prod_id}' (Type: {type(sheet_prod_id)}) in map.")
-                    match = shopee_id_map.get(sheet_prod_id)
-                    log_terminal(f"    - DEBUG: Match result: {'SUCCESS (Found Product)' if match else 'FAIL (Returned None)'}")
-                elif source == 'lazada':
-                    match = lazada_id_map.get(sheet_prod_id)
-
-            if match:
-                tier_1_match_success = True
-            
-            # Step 2: Match by Name (Fallback)
-            if not match:
-                match = name_map.get(cleaned_name.lower())
-            
-            # Process results
-            if match:
-                status = "MATCHED"
-                current_price = match.get('sale_price') or match.get('price', "N/A")
-                nearest_match_name = None 
-                
-                if tier_1_match_success:
-                    cleaned_name = match.get('name', cleaned_name) 
-                
-                # CRITICAL FIX: If matched, set slug to the DB slug
-                slug = match.get('slug', slug)
-            else:
-                # Step 3: No Match Found - Find the ONE best guess
-                status = "UNMATCHED"
-                current_price = "N/A"
-                nearest_match_name = None 
-                if all_product_names:
-                    best_match = fuzz_process.extractOne(cleaned_name, all_product_names, scorer=fuzz.token_set_ratio)
-                    if best_match: 
-                        nearest_match_name = best_match[0]
-            
-            product_stage_data = {
-                "slug": slug,
-                "parsed_name": cleaned_name,
-                "original_url": url,
-                "affiliate_link": affiliate_link,
-                "new_sale_price": new_sale_price,
-                "new_regular_price": new_regular_price,
-                "button_text": button_text,
-                "status": status,
-                "current_price": current_price,
-                "nearest_match": nearest_match_name,
-                "shopee_id": sheet_prod_id if source == 'shopee' else None,
-                "lazada_id": sheet_prod_id if source == 'lazada' else None,
-                "shop_id": sheet_shop_id,
-                "matched_db_id": match.get('id') if match else None,
-                "matched_db_slug": match.get('slug') if match else slug
-            }
-
-            # --- THIS IS THE CRITICAL DEBUG LOG ---
-            # We only log the "MATCHED" product we are debugging to avoid clutter
-            if status == "MATCHED":
-                 log_terminal(f"    - DEBUG: STAGING MATCHED PRODUCT: {json.dumps(product_stage_data)}")
-            
-            # 7. Add to Staging List
-            staged_products.append(product_stage_data)
-            
-            # --- 6. Add to Staging List with FINAL Schema ---
-            # staged_products.append({
-            #     "slug": slug, # Will be the DB slug if matched, or sheet slug if not
-            #     "parsed_name": cleaned_name,
-            #     "original_url": url,
-            #     "affiliate_link": affiliate_link,
-            #     "new_sale_price": new_sale_price,
-            #     "new_regular_price": new_regular_price,
-            #     "button_text": button_text,
-            #     "status": status,
-            #     "current_price": current_price,
-            #     "nearest_match": nearest_match_name,
-            #     "shopee_id": sheet_prod_id if source == 'shopee' else None,
-            #     "lazada_id": sheet_prod_id if source == 'lazada' else None,
-            #     "shop_id": sheet_shop_id,
-            #     "matched_db_id": match.get('id') if match else None, # PASS THE DB ID FORWARD
-            #     "matched_db_slug": match.get('slug') if match else slug # PASS THE DB SLUG FORWARD
-            # })
         
-        # 7. Save final list to Redis
+        # --- 4. SOURCE-AWARE PROCESSING ROUTER ---
+        
+        if source == 'shopee':
+            # --- SHOPEE LOGIC (Row-by-Row) ---
+            for row in grid_data:
+                vals = row.get("values", [])
+                if not vals or not vals[0].get("formattedValue"): continue
+                raw_text, url = extract_hyperlink_from_cell(vals[0])
+                if not url: continue
+                
+                # --- This block is your complete, working Shopee logic ---
+                cleaned_name = clean_product_name(raw_text) # First, clean the name
+                slug = slugify(cleaned_name)                # THEN, create the slug from the result
+                new_sale_price, new_regular_price = extract_prices_shopee(raw_text)
+                affiliate_link = convert_to_affiliate_link(url, slug)
+                ids = parse_ecommerce_url(url)
+                sheet_prod_id, sheet_shop_id, source_type = ids.get('product_id'), ids.get('shop_id'), ids.get('source')
+                button_text = f"Buy on {source_type.capitalize()}" if source_type else None
+
+                match, status, tier_1_match_success = None, "UNMATCHED", False
+                if sheet_prod_id and source_type == 'shopee':
+                    match = shopee_id_map.get(sheet_prod_id)
+                if match: tier_1_match_success = True
+                if not match: match = name_map.get(cleaned_name.lower())
+                
+                current_price, nearest_match_name = "N/A", None
+                if match:
+                    status, current_price = "MATCHED", match.get('sale_price') or match.get('price', "N/A")
+                    if tier_1_match_success: cleaned_name = match.get('name', cleaned_name)
+                    slug = match.get('slug', slug)
+                else:
+                    if all_product_names:
+                        best_match = fuzz_process.extractOne(cleaned_name, all_product_names, scorer=fuzz.token_set_ratio)
+                        if best_match: nearest_match_name = best_match[0]
+                
+                staged_products.append({
+                    "slug": slug, "parsed_name": cleaned_name, "original_url": url, "affiliate_link": affiliate_link,
+                    "new_sale_price": new_sale_price, "new_regular_price": new_regular_price, "button_text": button_text,
+                    "status": status, "current_price": current_price, "nearest_match": nearest_match_name,
+                    "shopee_id": sheet_prod_id, "lazada_id": None, "shop_id": sheet_shop_id, "source": source,
+                    "matched_db_id": match.get('id') if match else None, "matched_db_slug": match.get('slug') if match else slug
+                })
+
+        elif source == 'lazada':
+            # --- LAZADA LOGIC (Block-by-Block) ---
+            # from sheet_parser import clean_product_name_lazada, extract_prices_lazada
+            
+            row_iterator = iter(grid_data)
+            for row in row_iterator:
+                vals = row.get("values", [])
+                if not vals or not vals[0].get("formattedValue"): continue
+                
+                if vals[0].get("hyperlink"):
+                    first_line_text, url = extract_hyperlink_from_cell(vals[0])
+                    if not url: continue
+                    
+                    price_lines = [v.get("formattedValue", "") for r in islice(row_iterator, 3) for v in r.get("values", [])]
+                    
+                    cleaned_name = clean_product_name_lazada(first_line_text)
+                    new_sale_price, new_regular_price = extract_prices_lazada(price_lines)
+                    
+                    slug = slugify(cleaned_name)
+                    affiliate_link = convert_to_affiliate_link(url, slug)
+                    ids = parse_ecommerce_url(url)
+                    sheet_prod_id, sheet_shop_id, source_type = ids.get('product_id'), ids.get('shop_id'), ids.get('source')
+                    
+                    match, status = None, "UNMATCHED"
+                    if sheet_prod_id and source_type == 'lazada':
+                        match = lazada_id_map.get(sheet_prod_id)
+                    if not match: match = name_map.get(cleaned_name.lower())
+                    
+                    current_price, nearest_match_name = "N/A", None
+                    if match:
+                        status, current_price = "MATCHED", match.get('sale_price') or match.get('price', "N/A")
+                        cleaned_name = match.get('name', cleaned_name)
+                        slug = match.get('slug', slug)
+                    else:
+                        if all_product_names:
+                            best_match = fuzz_process.extractOne(cleaned_name, all_product_names, scorer=fuzz.token_set_ratio)
+                            if best_match: nearest_match_name = best_match[0]
+                            
+                    staged_products.append({
+                        "slug": slug, "parsed_name": cleaned_name, "original_url": url, "affiliate_link": affiliate_link,
+                        "new_sale_price": new_sale_price, "new_regular_price": new_regular_price, "button_text": "Buy on Lazada",
+                        "status": status, "current_price": current_price, "nearest_match": nearest_match_name,
+                        "shopee_id": None, "lazada_id": sheet_prod_id, "shop_id": sheet_shop_id, "source": source,
+                        "matched_db_id": match.get('id') if match else None, "matched_db_slug": match.get('slug') if match else slug
+                    })
+
+        # --- 5. Save to Redis ---
         redis_client.set(result_key, json.dumps(staged_products), ex=3600)
         final_status = {"job_id": job_id, "status": "complete", "result_key": result_key, "message": f"Staged {len(staged_products)} products."}
         redis_client.set(job_key, json.dumps(final_status), ex=3600)
-        log_terminal(f"✅ [GOLDEN KEY IMPORTER] Staged {len(staged_products)} products for review at key: {result_key}")
 
     except Exception as e:
-        log_terminal(f"❌ [GOLDEN KEY IMPORTER] FAILED for job {job_id}. Error: {e}")
-        redis_client.set(f"job:{job_id}", json.dumps({"job_id": job_id, "status": "failed", "error": str(e)}))
+        log_terminal(f"❌ [IMPORTER] FAILED for job {job_id}. Error: {e}")
         raise e
 
 @celery_app.task(bind=True)

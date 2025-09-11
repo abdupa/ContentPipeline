@@ -1403,3 +1403,73 @@ async def get_live_product_data(product_id: int):
     except Exception as e:
         log_terminal(f"❌ ERROR queuing inspection task: {e}")
         raise HTTPException(status_code=500, detail="Failed to queue the inspection task.")
+
+@app.post("/api/import/run-shopee-importer", response_model=JobCreationResponse)
+async def run_shopee_importer():
+    """Kicks off the importer task for the hardcoded Shopee Google Sheet."""
+    log_terminal("--- HIT: POST /api/import/run-shopee-importer ---")
+    try:
+        from tasks import import_from_google_sheet_task
+        
+        sheet_url = os.getenv("SHOPEE_SHEET_URL")
+        if not sheet_url:
+            raise HTTPException(status_code=500, detail="SHOPEE_SHEET_URL not set in .env file.")
+
+        job_id = f"import_shopee_{uuid.uuid4().hex[:8]}"
+
+        # Create the initial job status record immediately
+        job_status = { "job_id": job_id, "status": "starting", "message": "Queuing Shopee import task..." }
+        redis_client.set(f"job:{job_id}", json.dumps(job_status), ex=3600)
+        
+        # Pass the source type ('shopee') to the task
+        import_from_google_sheet_task.delay(job_id, sheet_url, 'shopee')
+        
+        return {"job_id": job_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# @app.post("/api/import/run-shopee-importer", response_model=JobCreationResponse)
+# async def run_shopee_importer():
+#     """Kicks off the importer task for the hardcoded Shopee Google Sheet."""
+#     log_terminal("--- HIT: POST /api/import/run-shopee-importer ---")
+#     try:
+#         from tasks import import_from_google_sheet_task
+        
+#         sheet_url = os.getenv("SHOPEE_SHEET_URL")
+#         if not sheet_url:
+#             raise HTTPException(status_code=500, detail="SHOPEE_SHEET_URL not set in .env file.")
+
+#         job_id = f"import_shopee_{uuid.uuid4().hex[:8]}"
+
+#         # --- FIX: Create the initial job status record immediately ---
+#         job_status = { "job_id": job_id, "status": "starting", "message": "Queuing Shopee import task..." }
+#         redis_client.set(f"job:{job_id}", json.dumps(job_status), ex=3600)
+        
+#         import_from_google_sheet_task.delay(job_id, sheet_url, 'shopee')
+        
+#         return {"job_id": job_id}
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/import/run-lazada-importer", response_model=JobCreationResponse)
+async def run_lazada_importer():
+        """Kicks off the importer task for the hardcoded Lazada Google Sheet."""
+        log_terminal("--- HIT: POST /api/import/run-lazada-importer ---")
+        try:
+            from tasks import import_from_google_sheet_task
+
+            sheet_url = os.getenv("LAZADA_SHEET_URL")
+            if not sheet_url:
+                raise HTTPException(status_code=500, detail="LAZADA_SHEET_URL not set in .env file.")
+
+            job_id = f"import_lazada_{uuid.uuid4().hex[:8]}"
+
+            # --- FIX: Create the initial job status record immediately ---
+            job_status = { "job_id": job_id, "status": "starting", "message": "Queuing Lazada import task..." }
+            redis_client.set(f"job:{job_id}", json.dumps(job_status), ex=3600)
+            
+            import_from_google_sheet_task.delay(job_id, sheet_url, 'lazada')
+            
+            return {"job_id": job_id}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
