@@ -13,7 +13,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, FileResponse
 from shared_state import redis_client, log_terminal, log_action
 from tasks import generate_preview_task, run_project_task, regenerate_content_task, regenerate_image_task, PROCESSED_URLS_KEY
-from data_tasks import update_product_database_task
+# from data_tasks import update_product_database_task
+from data_tasks import update_product_database_task, update_woocommerce_products_task, update_multi_source_products_task
 from openai import OpenAI
 from phone_tasks import run_phone_scraper_task
 from playwright.async_api import async_playwright
@@ -54,6 +55,7 @@ class StagedProduct(BaseModel):
     shopee_id: Optional[str] = None
     lazada_id: Optional[str] = None
     shop_id: Optional[str] = None
+    source: Optional[str] = None
     action: Optional[str] = None        # To accept 'approve', 'link', 'ignore'
     linked_db_id: Optional[int] = None  # To accept the WC ID you linked
     matched_db_id: Optional[int] = None
@@ -1251,7 +1253,8 @@ async def process_staged_data(payload: ProcessStagedPayload):
         log_terminal(f"    - Step 2: SUCCESS. Converted {len(products_as_dict_list)} models.")
 
         log_terminal("    - Step 3: Calling .delay() to queue Celery task...")
-        update_woocommerce_products_task.delay(final_job_id, products_as_dict_list)
+        # update_woocommerce_products_task.delay(final_job_id, products_as_dict_list)
+        update_multi_source_products_task.delay(final_job_id, products_as_dict_list) 
         log_terminal("    - Step 3: SUCCESS. Task successfully queued.")
         # --- End of fail zone ---
 

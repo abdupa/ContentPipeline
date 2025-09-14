@@ -266,6 +266,23 @@ def generate_lazada_click_id(prefix: str = "clk") -> str:
     total_length = random.choice([20, 21])
     return prefix + _rand_lower_alnum(total_length - len(prefix))
 
+def generate_utm_content(product_slug: str, max_len: int = 18) -> str:
+    """
+    Generate a Shopee-friendly utm_content value:
+    - Alphanumeric only (no spaces or symbols).
+    - Lowercased.
+    - Truncated to max_len characters.
+    - Falls back to "default" if empty.
+    """
+    if not isinstance(product_slug, str) or not product_slug.strip():
+        return "default"
+
+    # Keep only letters and numbers
+    alnum_only = re.sub(r'[^A-Za-z0-9]', '', product_slug)
+
+    # Apply length limit and fallback
+    return (alnum_only.lower()[:max_len] or "gadgetph")
+
 # --- FINAL, MULTI-SOURCE CONVERTER ---
 def convert_to_affiliate_link(url: str, product_slug: str) -> str:
     """
@@ -282,12 +299,13 @@ def convert_to_affiliate_link(url: str, product_slug: str) -> str:
     # --- 2. Router: Apply the correct parameters based on the source ---
     
     if 'shopee.ph' in str(url):
+        utm_content = generate_utm_content(product_slug)  # ✅ correct function call
         our_params = (
             f"?uls_trackid={generate_shopee_trackid()}"
-            f"&utm_campaign=id_HURtY6Geqq" # Your Shopee Campaign ID
-            f"&utm_content=----"
+            f"&utm_campaign=id_HURtY6Geqq"   # Your Shopee Campaign ID
+            f"&utm_content={utm_content}"
             f"&utm_medium=affiliates"
-            f"&utm_source=an_13327880016"  # Your Shopee Source ID
+            f"&utm_source=an_13327880016"    # Your Shopee Source ID
         )
         return base_url + our_params
 
@@ -413,16 +431,15 @@ def clean_product_name_lazada(first_line_text: str) -> str:
 
 def extract_prices_lazada(price_lines: list) -> tuple:
     """
-    (Smarter Version)
-    Extracts sale and regular price from a list of 2-3 text lines
-    from the Lazada sheet by identifying which lines contain extra text.
+    (V5 - FINAL CORRECTED VERSION)
+    Uses the original working logic and applies a minimal fix at the end to correctly
+    assign the variables in a single-price scenario.
     """
     sale_price = None
     regular_price = None
 
     price_pattern = r"([\d,]+\.?\d*)"
     
-    # --- FIX 1: Only look at lines that actually contain a price symbol ---
     candidate_lines = [line for line in price_lines if '₱' in line]
     
     for line in candidate_lines:
@@ -432,32 +449,75 @@ def extract_prices_lazada(price_lines: list) -> tuple:
         
         price_val = float(match.group(1).replace(",", ""))
         
-        # --- FIX 2: Check if the line contains significant text besides the price ---
-        # We strip the price, symbol, and whitespace to see what's left.
+        # This part correctly identifies which price is which when two are present
         text_part = re.sub(r"₱?\s*[\d,]+\.?\d*", "", line).strip()
-        
-        # If there are more than 2 characters of leftover text (like "Voucher..."), it's the regular price.
         if len(text_part) > 2:  
             regular_price = price_val
-        else: # Otherwise, the line is basically just the price, so it's the sale price.
+        else:
             sale_price = price_val
             
-    # Final sanity check: If for some reason regular price is less than sale price, swap them.
+    # This sanity check also remains correct
     if regular_price and sale_price and regular_price < sale_price:
         sale_price, regular_price = regular_price, sale_price
 
-    # This handles our "single price" logic from before. If only a regular price is found,
-    # it means the item is not on sale.
-    if regular_price and not sale_price:
-        # Check if the text implies a discount. If not, it's a regular price item.
-        has_discount_text = any("%" in line or "Voucher" in line.title() for line in candidate_lines)
-        if not has_discount_text:
-            # This was a single, non-sale price.
-            # sale_price should be None. regular_price is correct.
-            pass
-        else:
-            # This was likely a sale price that we miscategorized.
-            sale_price = regular_price
-            regular_price = None
+    # --- THE MINIMAL FIX IS HERE ---
+    # After the loop, if we only found a sale_price but no regular_price,
+    # it means we found a single price on a clean line. This should be the regular price.
+    if sale_price is not None and regular_price is None:
+        # Re-assign the single found price to be the regular_price.
+        regular_price = sale_price
+        sale_price = None
             
     return sale_price, regular_price
+
+# def extract_prices_lazada(price_lines: list) -> tuple:
+#     """
+#     (Smarter Version)
+#     Extracts sale and regular price from a list of 2-3 text lines
+#     from the Lazada sheet by identifying which lines contain extra text.
+#     """
+#     sale_price = None
+#     regular_price = None
+
+#     price_pattern = r"([\d,]+\.?\d*)"
+    
+#     # --- FIX 1: Only look at lines that actually contain a price symbol ---
+#     candidate_lines = [line for line in price_lines if '₱' in line]
+    
+#     for line in candidate_lines:
+#         match = re.search(price_pattern, line)
+#         if not match:
+#             continue
+        
+#         price_val = float(match.group(1).replace(",", ""))
+        
+#         # --- FIX 2: Check if the line contains significant text besides the price ---
+#         # We strip the price, symbol, and whitespace to see what's left.
+#         text_part = re.sub(r"₱?\s*[\d,]+\.?\d*", "", line).strip()
+        
+#         # If there are more than 2 characters of leftover text (like "Voucher..."), it's the regular price.
+#         if len(text_part) > 2:  
+#             regular_price = price_val
+#         else: # Otherwise, the line is basically just the price, so it's the sale price.
+#             sale_price = price_val
+            
+#     # Final sanity check: If for some reason regular price is less than sale price, swap them.
+#     if regular_price and sale_price and regular_price < sale_price:
+#         sale_price, regular_price = regular_price, sale_price
+
+#     # This handles our "single price" logic from before. If only a regular price is found,
+#     # it means the item is not on sale.
+#     if regular_price and not sale_price:
+#         # Check if the text implies a discount. If not, it's a regular price item.
+#         has_discount_text = any("%" in line or "Voucher" in line.title() for line in candidate_lines)
+#         if not has_discount_text:
+#             # This was a single, non-sale price.
+#             # sale_price should be None. regular_price is correct.
+#             pass
+#         else:
+#             # This was likely a sale price that we miscategorized.
+#             sale_price = regular_price
+#             regular_price = None
+            
+#     return sale_price, regular_price
+
