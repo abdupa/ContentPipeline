@@ -72,6 +72,21 @@ const UnmatchedActionCell = ({ product, dbCache, onLinkProduct, onSetAction }) =
   );
 };
 
+// A simple component to render the stock status badge
+const StockStatusBadge = ({ status }) => {
+    if (!status) return null;
+
+    const isOutOfStock = status === 'out_of_stock';
+    const bgColor = isOutOfStock ? 'bg-red-100' : 'bg-green-100';
+    const textColor = isOutOfStock ? 'text-red-800' : 'text-green-800';
+    const text = isOutOfStock ? 'Out of Stock' : 'In Stock';
+
+    return (
+        <span className={`px-2 py-1 text-xs font-medium rounded-full ${bgColor} ${textColor}`}>
+            {text}
+        </span>
+    );
+};
 
 /**
  * Main View Component
@@ -233,6 +248,7 @@ const PriceUpdateReviewView = ({ jobId, onJobStarted, onBack }) => {
               <th className="p-4 text-left text-xs font-bold text-gray-600 uppercase" style={{width: '220px'}}>Action</th>
               <th className="p-4 text-left text-xs font-bold text-gray-600 uppercase" style={{width: '30%'}}>Product Name / Link Target</th>
               <th className="p-4 text-left text-xs font-bold text-gray-600 uppercase">Status</th>
+              <th className="p-4 text-left text-xs font-bold text-gray-600 uppercase">Stock Status</th>
               <th className="p-4 text-left text-xs font-bold text-gray-600 uppercase">Sheet Product ID</th>
               <th className="p-4 text-left text-xs font-bold text-gray-600 uppercase">Sheet Shop ID</th>
               <th className="p-4 text-left text-xs font-bold text-gray-600 uppercase">Current DB Price</th>
@@ -283,6 +299,9 @@ const PriceUpdateReviewView = ({ jobId, onJobStarted, onBack }) => {
                   <span className={`px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(product.status, product.action)}`}>
                     {product.action === 'link' ? 'MANUAL LINK' : product.status}
                   </span>
+                </td>
+                <td className="p-4">
+                  <StockStatusBadge status={product.stock_status} />
                 </td>
                 <td className="p-4 text-sm text-gray-500 font-mono">{product.shopee_id || product.lazada_id || 'N/A'}</td>
                 <td className="p-4 text-sm text-gray-500 font-mono">{product.shop_id || 'N/A'}</td>

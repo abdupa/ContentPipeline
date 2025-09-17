@@ -24,3 +24,24 @@ npm-debug.log
 backend/browser_profile/
 chrome_dev_session/
 backend/google-sheets-credentials.json
+
+# Ignore common temporary file names
+frontend/tmp.css
+frontend/tmp.html
+frontend/tmp.json
+
+# Ignore files with version numbers or specific suffixes
+frontend/*[0-9].*.php
+frontend/*[0-9].*.css
+frontend/*xxx.php
+frontend/*[0-9].*.js
+
+# Ignore specific JSON files if they are temporary
+frontend/tmp*.json
+
+# Ignore python backup files
+backend/* copy.py
+
+# Ignore temporary php files
+backend/tmp.php
+backend/product_database.json

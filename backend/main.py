@@ -23,7 +23,7 @@ import csv
 from io import StringIO
 from google_client import get_gsc_service
 from google_auth_oauthlib.flow import Flow
-
+# from data_tasks import import_from_google_sheet_task
 
 
 app = FastAPI()
@@ -38,6 +38,12 @@ app.add_middleware(
 openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # --- Pydantic Models ---
+class PriceAlertSubscriptionPayload(BaseModel):
+    product_id: int
+    product_name: str
+    email: str
+    desired_price: float
+
 class StagedProduct(BaseModel):
     class Config:
         extra = "ignore"
@@ -56,8 +62,9 @@ class StagedProduct(BaseModel):
     lazada_id: Optional[str] = None
     shop_id: Optional[str] = None
     source: Optional[str] = None
-    action: Optional[str] = None        # To accept 'approve', 'link', 'ignore'
-    linked_db_id: Optional[int] = None  # To accept the WC ID you linked
+    action: Optional[str] = None
+    linked_db_id: Optional[int] = None
+    stock_status: Optional[str] = None
     matched_db_id: Optional[int] = None
     matched_db_slug: Optional[str] = None
 
@@ -1197,7 +1204,8 @@ async def import_from_google_sheet(payload: dict):
     """
     log_terminal("--- HIT: POST /api/import/google-sheet ---")
     try:
-        from tasks import import_from_google_sheet_task
+        # from tasks import import_from_google_sheet_task
+        from data_tasks import import_from_google_sheet_task
         
         sheet_url = payload.get("sheet_url")
         if not sheet_url:
@@ -1412,7 +1420,8 @@ async def run_shopee_importer():
     """Kicks off the importer task for the hardcoded Shopee Google Sheet."""
     log_terminal("--- HIT: POST /api/import/run-shopee-importer ---")
     try:
-        from tasks import import_from_google_sheet_task
+        # from tasks import import_from_google_sheet_task
+        from data_tasks import import_from_google_sheet_task
         
         sheet_url = os.getenv("SHOPEE_SHEET_URL")
         if not sheet_url:
@@ -1437,7 +1446,8 @@ async def run_lazada_importer():
         """Kicks off the importer task for the hardcoded Lazada Google Sheet."""
         log_terminal("--- HIT: POST /api/import/run-lazada-importer ---")
         try:
-            from tasks import import_from_google_sheet_task
+            # from tasks import import_from_google_sheet_task
+            from data_tasks import import_from_google_sheet_task
 
             sheet_url = os.getenv("LAZADA_SHEET_URL")
             if not sheet_url:
@@ -1467,3 +1477,21 @@ async def get_audit_log(job_id: str):
         return [] 
         
     return json.loads(audit_json)
+
+@app.post("/api/alerts/subscribe", status_code=202)
+async def subscribe_to_price_alert(payload: PriceAlertSubscriptionPayload):
+    """
+    Receives a price alert subscription and queues it for processing.
+    """
+    log_terminal(f"--- HIT: POST /api/alerts/subscribe for product {payload.product_id} ---")
+    try:
+        # Import the new task
+        from alert_tasks import create_price_alert_task
+        
+        # Queue the task, passing the payload as a dictionary
+        create_price_alert_task.delay(payload.dict())
+        
+        return {"message": "Subscription accepted. You will be notified when the price drops."}
+    except Exception as e:
+        log_terminal(f"❌ ERROR queuing price alert task: {e}")
+        raise HTTPException(status_code=500, detail="Failed to queue the subscription task.")

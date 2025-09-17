@@ -2,6 +2,7 @@ import os
 import json
 import time
 import math 
+import re
 import requests
 from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
@@ -9,6 +10,14 @@ from woocommerce import API
 from shared_state import log_terminal, redis_client
 from sheet_parser import slugify
 import sys
+from google_sheets import get_sheets_service, fetch_sheet_grid
+from sheet_parser import (
+    clean_product_name, extract_prices_shopee, extract_hyperlink_from_cell,
+    slugify, convert_to_affiliate_link, parse_ecommerce_url,
+    extract_prices_lazada, clean_product_name_lazada
+)
+from thefuzz import process as fuzz_process, fuzz
+from itertools import islice
 
 # --- Import the shared Celery app ---
 from celery_app import app as celery_app
@@ -63,14 +72,12 @@ def _create_audit_log(status: str, total_found: int, total_synced: int, failed_i
     except Exception as e:
         log_terminal(f"    - ⚠️ CRITICAL: Failed to write to audit_log.jsonl: {e}")
 
-
 @celery_app.task
 def update_product_database_task():
-    # This is our upgraded V3 task from Phase 1
     """
-    (DEEP SYNC v3 - MULTI-SOURCE SCHEMA)
+    (DEEP SYNC v3.1 - REFINED LOGGING)
     Builds an accurate mirror of the live WooCommerce database with the new
-    multi-source schema, including a 'linked_sources' object.
+    multi-source schema, now with clearer, more detailed logging for progress and errors.
     """
     all_product_ids = []
     failed_ids = []
@@ -81,6 +88,7 @@ def update_product_database_task():
         if not wcapi:
             raise Exception("WooCommerce API client not available.")
 
+        # --- STEP 1: EFFICIENTLY FETCH ALL PRODUCT IDs (Unchanged) ---
         page = 1
         log_terminal("    - Step 1: Fetching all product IDs...")
         while True:
@@ -96,62 +104,68 @@ def update_product_database_task():
         
         log_terminal(f"    - Found a total of {len(all_product_ids)} products to sync.")
         
+        # --- STEP 2: LOOP AND DEEP SYNC EACH PRODUCT ---
         all_products = []
-        
         POLITE_DELAY_SECONDS = 0.5 
         MAX_SINGLE_PRODUCT_RETRIES = 3
         RETRY_DELAY_SECONDS = 5
 
         for index, product_id in enumerate(all_product_ids):
-            log_terminal(f"    - Syncing product {index + 1}/{len(all_product_ids)} (ID: {product_id})...")
-            
+            # REFINED: Clearer per-product heading
+            log_terminal(f"--- Syncing product {index + 1}/{len(all_product_ids)} (ID: {product_id}) ---")
+
             synced_successfully = False
             for attempt in range(MAX_SINGLE_PRODUCT_RETRIES):
                 try:
                     fields = "id,name,slug,permalink,price,regular_price,sale_price,sku,external_url,button_text,attributes,meta_data"
                     product = wcapi.get(f"products/{product_id}", params={"_fields": fields}).json()
                     
+                    # (The data processing logic is unchanged from your working version)
                     meta_map = {item['key']: item['value'] for item in product.get('meta_data', [])}
-                    key_specs = {
-                        attr['name']: ", ".join(attr['options'])
-                        for attr in product.get('attributes', []) if attr.get('options')
-                    }
+                    key_specs = {attr['name']: ", ".join(attr['options']) for attr in product.get('attributes', []) if attr.get('options')}
+                    linked_sources = {}
+                    sources_to_check = ['shopee', 'lazada'] # Can be expanded in the future
 
-                    linked_sources = {
-                        "shopee": { "source_product_id": meta_map.get('_shopee_id'), "name": None, "url": None, "price": None, "last_updated": None, },
-                        "lazada": { "source_product_id": meta_map.get('_lazada_id'), "name": None, "url": None, "price": None, "last_updated": None, }
-                    }
-
+                    for source in sources_to_check:
+                        # Check if this source has any price data to indicate it's active
+                        if meta_map.get(f'_{source}_price'):
+                            linked_sources[source] = {
+                                "product_id": meta_map.get(f'_{source}_id'),
+                                "sale_price": float(meta_map.get(f'_{source}_price')) if meta_map.get(f'_{source}_price') else None,
+                                "regular_price": None, # Note: We don't store a separate regular price per source in WC meta
+                                "affiliate_url": meta_map.get(f'_{source}_url'),
+                                "last_updated": meta_map.get(f'_{source}_last_updated'),
+                                "price_history": json.loads(meta_map.get(f'_{source}_price_history', '[]')),
+                            }
                     product_data = {
-                        "id": product.get('id'), "name": product.get('name'), "sku": product.get('sku'),
-                        "slug": product.get('slug'), "permalink": product.get('permalink'), "key_specs": key_specs,
-                        "price": product.get('price') or "N/A", "sale_price": product.get('sale_price'),
-                        "regular_price": product.get('regular_price'), "external_url": product.get('external_url'),
-                        "button_text": product.get('button_text'), "shopee_id": meta_map.get('_shopee_id'),
-                        "lazada_id": meta_map.get('_lazada_id'), "shop_id": meta_map.get('_shop_id'),
-                        "price_history": json.loads(meta_map.get('_price_history', '[]')),
-                        "current_sale_price": product.get('sale_price') or product.get('regular_price'),
-                        "current_source": "woocommerce",
-                        "linked_sources": linked_sources,
+                        "id": product.get('id'), "name": product.get('name'), "sku": product.get('sku'), "slug": product.get('slug'), "permalink": product.get('permalink'), "key_specs": key_specs,
+                        "price": product.get('price') or "N/A", "sale_price": product.get('sale_price'), "regular_price": product.get('regular_price'), "external_url": product.get('external_url'), "button_text": product.get('button_text'), "shopee_id": meta_map.get('_shopee_id'),
+                        "lazada_id": meta_map.get('_lazada_id'), "shop_id": meta_map.get('_shop_id'), "price_history": json.loads(meta_map.get('_price_history', '[]')),
+                        "current_sale_price": product.get('sale_price') or product.get('regular_price'), "current_source": "woocommerce", "linked_sources": linked_sources,
                     }
                     
                     all_products.append(product_data)
                     synced_successfully = True
-                    break
+                    break # Success! Exit the retry loop.
 
                 except requests.exceptions.RequestException as e:
-                    log_terminal(f"    - ⚠️ WARNING: (Attempt {attempt + 1}/{MAX_SINGLE_PRODUCT_RETRIES}) Network/API error for ID {product_id}. Status: {e.response.status_code if e.response else 'N/A'}.")
-                    if attempt < MAX_SINGLE_PRODUCT_RETRIES - 1: time.sleep(RETRY_DELAY_SECONDS)
+                    # REFINED: More detailed network error logging
+                    log_terminal(f"    - ⚠️ WARNING (Attempt {attempt + 1}/{MAX_SINGLE_PRODUCT_RETRIES}): Network error. Status: {e.response.status_code if e.response else 'N/A'}. Retrying in {RETRY_DELAY_SECONDS}s...")
+                    time.sleep(RETRY_DELAY_SECONDS)
                 except Exception as e:
-                    log_terminal(f"    - ⚠️ WARNING: (Attempt {attempt + 1}) An unexpected error occurred for product ID {product_id}: {e}. This error will not be retried.")
+                    log_terminal(f"    - ❌ An unexpected error occurred: {e}. This product will not be retried.")
                     break
 
-            if not synced_successfully:
-                log_terminal(f"    - ❌ CRITICAL: Failed to sync product ID {product_id} after {MAX_SINGLE_PRODUCT_RETRIES} attempts. Skipping.")
+            # NEW: Final status log for each product
+            if synced_successfully:
+                log_terminal(f"    - ✅ SUCCESS: Product ID {product_id} synced.")
+            else:
+                log_terminal(f"    - ❌ FAILED: Product ID {product_id} could not be synced after {MAX_SINGLE_PRODUCT_RETRIES} attempts.")
                 failed_ids.append(product_id)
 
             time.sleep(POLITE_DELAY_SECONDS)
 
+        # --- 3. Save & Audit (Unchanged) ---
         with open(PRODUCT_DB_PATH, 'w', encoding='utf-8') as f:
             json.dump(all_products, f, indent=2, ensure_ascii=False)
         
@@ -163,6 +177,107 @@ def update_product_database_task():
         log_terminal(f"❌ [DEEP SYNC] {error_message}")
         _create_audit_log(status="FAILED", total_found=len(all_product_ids), total_synced=0, failed_ids=all_product_ids, error_message=error_message)
         raise e
+
+
+# @celery_app.task
+# def update_product_database_task():
+#     # This is our upgraded V3 task from Phase 1
+#     """
+#     (DEEP SYNC v3 - MULTI-SOURCE SCHEMA)
+#     Builds an accurate mirror of the live WooCommerce database with the new
+#     multi-source schema, including a 'linked_sources' object.
+#     """
+#     all_product_ids = []
+#     failed_ids = []
+    
+#     try:
+#         log_terminal("--- [DEEP SYNC] Starting full product database synchronization... ---")
+#         wcapi = get_wc_api()
+#         if not wcapi:
+#             raise Exception("WooCommerce API client not available.")
+
+#         page = 1
+#         log_terminal("    - Step 1: Fetching all product IDs...")
+#         while True:
+#             try:
+#                 products_batch = wcapi.get("products", params={"per_page": 100, "page": page, "status": "publish", "_fields": "id"}).json()
+#                 if not products_batch: break
+#                 all_product_ids.extend([p['id'] for p in products_batch])
+#                 log_terminal(f"    - Found {len(all_product_ids)} IDs so far...")
+#                 page += 1
+#             except Exception as e:
+#                 log_terminal(f"    - ❌ ERROR fetching product ID list on page {page}: {e}")
+#                 break
+        
+#         log_terminal(f"    - Found a total of {len(all_product_ids)} products to sync.")
+        
+#         all_products = []
+        
+#         POLITE_DELAY_SECONDS = 0.5 
+#         MAX_SINGLE_PRODUCT_RETRIES = 3
+#         RETRY_DELAY_SECONDS = 5
+
+#         for index, product_id in enumerate(all_product_ids):
+#             log_terminal(f"    - Syncing product {index + 1}/{len(all_product_ids)} (ID: {product_id})...")
+            
+#             synced_successfully = False
+#             for attempt in range(MAX_SINGLE_PRODUCT_RETRIES):
+#                 try:
+#                     fields = "id,name,slug,permalink,price,regular_price,sale_price,sku,external_url,button_text,attributes,meta_data"
+#                     product = wcapi.get(f"products/{product_id}", params={"_fields": fields}).json()
+                    
+#                     meta_map = {item['key']: item['value'] for item in product.get('meta_data', [])}
+#                     key_specs = {
+#                         attr['name']: ", ".join(attr['options'])
+#                         for attr in product.get('attributes', []) if attr.get('options')
+#                     }
+
+#                     linked_sources = {
+#                         "shopee": { "source_product_id": meta_map.get('_shopee_id'), "name": None, "url": None, "price": None, "last_updated": None, },
+#                         "lazada": { "source_product_id": meta_map.get('_lazada_id'), "name": None, "url": None, "price": None, "last_updated": None, }
+#                     }
+
+#                     product_data = {
+#                         "id": product.get('id'), "name": product.get('name'), "sku": product.get('sku'),
+#                         "slug": product.get('slug'), "permalink": product.get('permalink'), "key_specs": key_specs,
+#                         "price": product.get('price') or "N/A", "sale_price": product.get('sale_price'),
+#                         "regular_price": product.get('regular_price'), "external_url": product.get('external_url'),
+#                         "button_text": product.get('button_text'), "shopee_id": meta_map.get('_shopee_id'),
+#                         "lazada_id": meta_map.get('_lazada_id'), "shop_id": meta_map.get('_shop_id'),
+#                         "price_history": json.loads(meta_map.get('_price_history', '[]')),
+#                         "current_sale_price": product.get('sale_price') or product.get('regular_price'),
+#                         "current_source": "woocommerce",
+#                         "linked_sources": linked_sources,
+#                     }
+                    
+#                     all_products.append(product_data)
+#                     synced_successfully = True
+#                     break
+
+#                 except requests.exceptions.RequestException as e:
+#                     log_terminal(f"    - ⚠️ WARNING: (Attempt {attempt + 1}/{MAX_SINGLE_PRODUCT_RETRIES}) Network/API error for ID {product_id}. Status: {e.response.status_code if e.response else 'N/A'}.")
+#                     if attempt < MAX_SINGLE_PRODUCT_RETRIES - 1: time.sleep(RETRY_DELAY_SECONDS)
+#                 except Exception as e:
+#                     log_terminal(f"    - ⚠️ WARNING: (Attempt {attempt + 1}) An unexpected error occurred for product ID {product_id}: {e}. This error will not be retried.")
+#                     break
+
+#             if not synced_successfully:
+#                 log_terminal(f"    - ❌ CRITICAL: Failed to sync product ID {product_id} after {MAX_SINGLE_PRODUCT_RETRIES} attempts. Skipping.")
+#                 failed_ids.append(product_id)
+
+#             time.sleep(POLITE_DELAY_SECONDS)
+
+#         with open(PRODUCT_DB_PATH, 'w', encoding='utf-8') as f:
+#             json.dump(all_products, f, indent=2, ensure_ascii=False)
+        
+#         _create_audit_log(status="SUCCESS", total_found=len(all_product_ids), total_synced=len(all_products), failed_ids=failed_ids)
+#         return f"Deep Sync complete. Synced {len(all_products)}/{len(all_product_ids)} products."
+        
+#     except Exception as e:
+#         error_message = f"A critical, unhandled error occurred: {e}"
+#         log_terminal(f"❌ [DEEP SYNC] {error_message}")
+#         _create_audit_log(status="FAILED", total_found=len(all_product_ids), total_synced=0, failed_ids=all_product_ids, error_message=error_message)
+#         raise e
 
 
 @celery_app.task(bind=True)
@@ -394,29 +509,44 @@ def update_multi_source_products_task(self, job_id: str, approved_products: list
                 log_terminal(f"    - Step A: Updating source '{source}' data in local DB object...") # NEW LOG
                 if 'linked_sources' not in local_prod_to_update: local_prod_to_update['linked_sources'] = {}
                 source_data = local_prod_to_update['linked_sources'].get(source, {})
-                
+                source_data = local_prod_to_update['linked_sources'].get(source, {})
+
+                # 1. Safely get the existing history BEFORE we overwrite anything.
+                existing_history = source_data.get('price_history', [])
+
+                # 2. Update the source data with all the new information from the importer.
                 current_price = approved_prod.get('new_sale_price') or approved_prod.get('new_regular_price')
                 source_data.update({
-                    "product_id": approved_prod.get(f'{source}_id'), "sale_price": approved_prod.get('new_sale_price'),
-                    "regular_price": approved_prod.get('new_regular_price'), "affiliate_url": approved_prod.get('affiliate_link'),
-                    "last_updated": datetime.now(timezone.utc).isoformat()
+                    "product_id": approved_prod.get(f'{source}_id'),
+                    "sale_price": approved_prod.get('new_sale_price'),
+                    "regular_price": approved_prod.get('new_regular_price'),
+                    "affiliate_url": approved_prod.get('affiliate_link'),
+                    "last_updated": datetime.now(timezone.utc).isoformat(),
+                    "stock_status": approved_prod.get('stock_status', 'in_stock')
                 })
-                
-                history = source_data.get('price_history', [])
-                if not history or (history and history[-1].get('price') != current_price):
-                    history.append({"date": today_str, "price": current_price})
-                source_data['price_history'] = history
+
+                # 3. Now, append the new price to the history we saved in step 1.
+                if current_price is not None:
+                    # Prevents adding a new history entry if the price hasn't changed.
+                    if not existing_history or (existing_history and existing_history[-1].get('price') != current_price):
+                        existing_history.append({"date": today_str, "price": current_price})
+
+                # 4. Save the fully updated history back into the source object.
+                source_data['price_history'] = existing_history
                 local_prod_to_update['linked_sources'][source] = source_data
-                log_terminal("    - Step A: Complete.") # NEW LOG
+                log_terminal("    - Step A: Complete.")
 
                 log_terminal("    - Step B: Determining winning price...") # NEW LOG
                 winning_source_key, lowest_price = None, float('inf')
                 for source_key, data in local_prod_to_update.get('linked_sources', {}).items():
-                    price = data.get('sale_price') or data.get('regular_price')
-                    if price is not None and price < lowest_price:
-                        lowest_price = price
-                        winning_source_key = source_key
-                log_terminal(f"    - Step B: Complete. Winner is '{winning_source_key}' with price {lowest_price}.") # NEW LOG
+                    # This single, clean block ensures we only check in-stock products.
+                    if data.get('stock_status') == 'in_stock':
+                        price = data.get('sale_price') or data.get('regular_price')
+                        if price is not None and price < lowest_price:
+                            lowest_price = price
+                            winning_source_key = source_key
+
+                log_terminal(f"    - Step B: Complete. Winner is '{winning_source_key}' with price {lowest_price}.")
                 
                 if winning_source_key:
                     winning_source_data = local_prod_to_update['linked_sources'][winning_source_key]
@@ -441,7 +571,7 @@ def update_multi_source_products_task(self, job_id: str, approved_products: list
                         "shopee_id": shopee_data.get('product_id'),
                         "lazada_id": lazada_data.get('product_id'),
                         "external_url": winning_source_data.get('affiliate_url'),
-                        "button_text": f"Check Price on {winning_source_key.capitalize()}"
+                        "button_text": f"Get Lowest Price on {winning_source_key.capitalize()}"
                     })
                     log_terminal("    - Step C: Complete.")
 
@@ -482,12 +612,46 @@ def update_multi_source_products_task(self, job_id: str, approved_products: list
                     product_api_data = {
                         "id": local_prod_to_update.get('id'), "type": "external", "price": final_main_price_str,
                         "regular_price": final_reg_price_str, "sale_price": final_sale_price_str,
-                        "external_url": winning_source_data.get('affiliate_url'), "button_text": f"Check Price on {winning_source_key.capitalize()}",
+                        "external_url": winning_source_data.get('affiliate_url'), "button_text": f"Get Lowest Price on {winning_source_key.capitalize()}",
                         "meta_data": meta_data_list
                     }
                     wc_full_batch_payload.append(product_api_data)
                     log_terminal("    - Step D: Complete. Product added to the final sync batch.")
                 else:
+                    # --- NEW LOGIC: For when ALL sources are OUT OF STOCK ---
+                    log_terminal(f"    - ⚠️ All sources for product ID {target_db_id} are out of stock. Setting to 'Phased Out' state.")
+
+                    # Update local DB to reflect the phased-out state
+                    local_prod_to_update.update({
+                        "current_sale_price": None,
+                        "current_regular_price": None,
+                        "current_source": "none",
+                        "current_affiliate_url": ""
+                    })
+                    # --- ADD THIS BLOCK ---
+                    audit_entry = {
+                        "name": local_prod_to_update.get('name'),
+                        "wc_id": local_prod_to_update.get('id'),
+                        "status": "Phased Out",
+                        "price_before": local_prod_to_update.get('current_sale_price'),
+                        "price_after": None,
+                        "details": "All sources are out of stock. Product link updated to category page."
+                    }
+                    audit_log_entries.append(audit_entry)
+                    # --- END BLOCK ---
+
+                    # Prepare the special payload for WooCommerce
+                    product_api_data = {
+                        "id": local_prod_to_update.get('id'),
+                        "price": "",          # Set price to empty
+                        "regular_price": "",  # Set price to empty
+                        "sale_price": "",     # Set price to empty
+                        # Set the URL to the product's own permalink. The WP plugin will redirect this.
+                        "external_url": "",
+                        "button_text": "Out of Stock - Check Alternatives"
+                    }
+                    wc_full_batch_payload.append(product_api_data)
+                    log_terminal("    - ✅ SUCCESS: 'Phased Out' product payload added to the batch.")
                     log_terminal("    - ⚠️ SKIPPING PAYLOAD: No winning price was determined.")
             else:
                  log_terminal(f"    - ❌ SKIPPING PRODUCT: No entry found in local database for ID {target_db_id}.") # NEW LOG
@@ -601,6 +765,285 @@ if __name__ == "__main__":
         sys.exit(1)
     product_id_arg = sys.argv[1]
     run_inspector(product_id_arg)
+
+
+@celery_app.task(bind=True)
+def import_from_google_sheet_task(self, job_id: str, sheet_url: str, source: str):
+    """
+    (V2.0 - STOCK STATUS AWARE)
+    Reads from "In Stock" and "Sold Out" tabs in a Google Sheet to assign a
+    stock status to each product before staging it for review.
+    """
+    job_key = f"job:{job_id}"
+    result_key = f"staging_area:{job_id}"
+    log_terminal(f"--- [IMPORTER] Starting job {job_id} for source: {source.upper()} ---")
+    
+    try:
+        # --- 1. Load Fresh DB & Build Lookup Maps (Your existing code) ---
+        product_database = []
+        try:
+            with open(PRODUCT_DB_PATH, 'r', encoding='utf-8') as f:
+                product_database = json.load(f)
+        except Exception: pass
+        
+        shopee_id_map, lazada_id_map, name_map, all_product_names = {}, {}, {}, []
+        for prod in product_database:
+            if prod.get('shopee_id'): shopee_id_map[str(prod['shopee_id'])] = prod
+            if prod.get('lazada_id'): lazada_id_map[str(prod['lazada_id'])] = prod
+            if prod.get('name'):
+                name_map[prod['name'].lower()] = prod
+                all_product_names.append(prod['name'])
+        
+        # --- 2. Fetch Spreadsheet Metadata ---
+        match = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", sheet_url)
+        spreadsheet_id = match.group(1)
+        service = get_sheets_service()
+        sheet_metadata = service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+        
+        staged_products = []
+        
+        # --- 3. NEW: Define Sheets to Process ---
+        sheets_to_process = {
+            "In Stock": "in_stock",
+            "Sold Out": "out_of_stock"
+        }
+
+        # --- 4. NEW: Loop Through Each Sheet ---
+        for sheet_name, stock_status in sheets_to_process.items():
+            log_terminal(f"    - Searching for '{sheet_name}' sheet...")
+            sheet = next((s for s in sheet_metadata['sheets'] if s['properties']['title'] == sheet_name), None)
+
+            if not sheet:
+                log_terminal(f"    - ⚠️ WARNING: Sheet named '{sheet_name}' not found. Skipping.")
+                continue
+            
+            log_terminal(f"    - Found '{sheet_name}'. Fetching and parsing products...")
+            grid_data = fetch_sheet_grid(spreadsheet_id, sheet_name)
+
+            # --- 5. SOURCE-AWARE PROCESSING ROUTER (Your existing logic) ---
+            if source == 'shopee':
+                for row in grid_data:
+                    vals = row.get("values", [])
+                    if not vals or not vals[0].get("formattedValue"): continue
+                    raw_text, url = extract_hyperlink_from_cell(vals[0])
+                    if not url: continue
+                    
+                    cleaned_name = clean_product_name(raw_text)
+                    slug = slugify(cleaned_name)
+                    new_sale_price, new_regular_price = extract_prices_shopee(raw_text)
+                    affiliate_link = convert_to_affiliate_link(url, slug)
+                    ids = parse_ecommerce_url(url)
+                    sheet_prod_id, sheet_shop_id, source_type = ids.get('product_id'), ids.get('shop_id'), ids.get('source')
+                    button_text = f"Buy on {source_type.capitalize()}" if source_type else None
+                    match, status, tier_1_match_success = None, "UNMATCHED", False
+                    if sheet_prod_id and source_type == 'shopee':
+                        match = shopee_id_map.get(sheet_prod_id)
+                    if match: tier_1_match_success = True
+                    if not match: match = name_map.get(cleaned_name.lower())
+                    current_price, nearest_match_name = "N/A", None
+                    if match:
+                        status, current_price = "MATCHED", match.get('sale_price') or match.get('price', "N/A")
+                        if tier_1_match_success: cleaned_name = match.get('name', cleaned_name)
+                        slug = match.get('slug', slug)
+                    else:
+                        if all_product_names:
+                            best_match = fuzz_process.extractOne(cleaned_name, all_product_names, scorer=fuzz.token_set_ratio)
+                            if best_match: nearest_match_name = best_match[0]
+                    
+                    staged_products.append({
+                        "slug": slug, "parsed_name": cleaned_name, "original_url": url, "affiliate_link": affiliate_link,
+                        "new_sale_price": new_sale_price, "new_regular_price": new_regular_price, "button_text": button_text,
+                        "status": status, "current_price": current_price, "nearest_match": nearest_match_name,
+                        "shopee_id": sheet_prod_id, "lazada_id": None, "shop_id": sheet_shop_id, "source": source,
+                        "matched_db_id": match.get('id') if match else None, "matched_db_slug": match.get('slug') if match else slug,
+                        "stock_status": stock_status, # <-- TARGETED CHANGE
+                    })
+
+            elif source == 'lazada':
+                row_iterator = iter(grid_data)
+                for row in row_iterator:
+                    vals = row.get("values", [])
+                    if not vals or not vals[0].get("formattedValue"): continue
+                    if vals[0].get("hyperlink"):
+                        first_line_text, url = extract_hyperlink_from_cell(vals[0])
+                        if not url: continue
+                        price_lines = [v.get("formattedValue", "") for r in islice(row_iterator, 3) for v in r.get("values", [])]
+                        cleaned_name = clean_product_name_lazada(first_line_text)
+                        new_sale_price, new_regular_price = extract_prices_lazada(price_lines)
+                        slug = slugify(cleaned_name)
+                        affiliate_link = convert_to_affiliate_link(url, slug)
+                        ids = parse_ecommerce_url(url)
+                        sheet_prod_id, sheet_shop_id, source_type = ids.get('product_id'), ids.get('shop_id'), ids.get('source')
+                        match, status = None, "UNMATCHED"
+                        if sheet_prod_id and source_type == 'lazada':
+                            match = lazada_id_map.get(sheet_prod_id)
+                        if not match: match = name_map.get(cleaned_name.lower())
+                        current_price, nearest_match_name = "N/A", None
+                        if match:
+                            status, current_price = "MATCHED", match.get('sale_price') or match.get('price', "N/A")
+                            cleaned_name = match.get('name', cleaned_name)
+                            slug = match.get('slug', slug)
+                        else:
+                            if all_product_names:
+                                best_match = fuzz_process.extractOne(cleaned_name, all_product_names, scorer=fuzz.token_set_ratio)
+                                if best_match: nearest_match_name = best_match[0]
+                        
+                        staged_products.append({
+                            "slug": slug, "parsed_name": cleaned_name, "original_url": url, "affiliate_link": affiliate_link,
+                            "new_sale_price": new_sale_price, "new_regular_price": new_regular_price, "button_text": "Buy on Lazada",
+                            "status": status, "current_price": current_price, "nearest_match": nearest_match_name,
+                            "shopee_id": None, "lazada_id": sheet_prod_id, "shop_id": sheet_shop_id, "source": source,
+                            "matched_db_id": match.get('id') if match else None, "matched_db_slug": match.get('slug') if match else slug,
+                            "stock_status": stock_status, # <-- TARGETED CHANGE
+                        })
+
+        # --- 6. Save to Redis (Your existing code) ---
+        redis_client.set(result_key, json.dumps(staged_products), ex=3600)
+        final_status = {"job_id": job_id, "status": "complete", "result_key": result_key, "message": f"Staged {len(staged_products)} products."}
+        redis_client.set(job_key, json.dumps(final_status), ex=3600)
+
+    except Exception as e:
+        log_terminal(f"❌ [IMPORTER] FAILED for job {job_id}. Error: {e}")
+        raise e
+
+# @celery_app.task(bind=True)
+# def import_from_google_sheet_task(self, job_id: str, sheet_url: str, source: str):
+#     """
+#     (FINAL, SOURCE-AWARE VERSION)
+#     Connects to a Google Sheet and intelligently calls the correct parser
+#     (Shopee or Lazada) based on the `source` parameter.
+#     """
+#     job_key = f"job:{job_id}"
+#     result_key = f"staging_area:{job_id}"
+#     log_terminal(f"--- [IMPORTER] Starting job {job_id} for source: {source.upper()} ---")
+    
+#     try:
+#         # --- 1. Load Fresh DB ---
+#         product_database = []
+#         try:
+#             with open(PRODUCT_DB_PATH, 'r', encoding='utf-8') as f:
+#                 product_database = json.load(f)
+#         except Exception: pass
+        
+#         # --- 2. Build Lookup Maps ---
+#         shopee_id_map, lazada_id_map, name_map, all_product_names = {}, {}, {}, []
+#         for prod in product_database:
+#             if prod.get('shopee_id'): shopee_id_map[str(prod['shopee_id'])] = prod
+#             if prod.get('lazada_id'): lazada_id_map[str(prod['lazada_id'])] = prod
+#             if prod.get('name'):
+#                 name_map[prod['name'].lower()] = prod
+#                 all_product_names.append(prod['name'])
+        
+#         # --- 3. Fetch Grid Data from Google Sheets API ---
+#         match = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", sheet_url)
+#         spreadsheet_id = match.group(1)
+#         gid_match = re.search(r"[#&]gid=([0-9]+)", sheet_url)
+#         sheet_gid = gid_match.group(1)
+        
+#         service = get_sheets_service()
+#         sheet_metadata = service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+#         sheet = next((s for s in sheet_metadata['sheets'] if s['properties']['sheetId'] == int(sheet_gid)), None)
+#         grid_data = fetch_sheet_grid(spreadsheet_id, sheet['properties']['title'])
+
+#         staged_products = []
+        
+#         # --- 4. SOURCE-AWARE PROCESSING ROUTER ---
+        
+#         if source == 'shopee':
+#             # --- SHOPEE LOGIC (Row-by-Row) ---
+#             for row in grid_data:
+#                 vals = row.get("values", [])
+#                 if not vals or not vals[0].get("formattedValue"): continue
+#                 raw_text, url = extract_hyperlink_from_cell(vals[0])
+#                 if not url: continue
+                
+#                 # --- This block is your complete, working Shopee logic ---
+#                 cleaned_name = clean_product_name(raw_text) # First, clean the name
+#                 slug = slugify(cleaned_name)                # THEN, create the slug from the result
+#                 new_sale_price, new_regular_price = extract_prices_shopee(raw_text)
+#                 affiliate_link = convert_to_affiliate_link(url, slug)
+#                 ids = parse_ecommerce_url(url)
+#                 sheet_prod_id, sheet_shop_id, source_type = ids.get('product_id'), ids.get('shop_id'), ids.get('source')
+#                 button_text = f"Buy on {source_type.capitalize()}" if source_type else None
+
+#                 match, status, tier_1_match_success = None, "UNMATCHED", False
+#                 if sheet_prod_id and source_type == 'shopee':
+#                     match = shopee_id_map.get(sheet_prod_id)
+#                 if match: tier_1_match_success = True
+#                 if not match: match = name_map.get(cleaned_name.lower())
+                
+#                 current_price, nearest_match_name = "N/A", None
+#                 if match:
+#                     status, current_price = "MATCHED", match.get('sale_price') or match.get('price', "N/A")
+#                     if tier_1_match_success: cleaned_name = match.get('name', cleaned_name)
+#                     slug = match.get('slug', slug)
+#                 else:
+#                     if all_product_names:
+#                         best_match = fuzz_process.extractOne(cleaned_name, all_product_names, scorer=fuzz.token_set_ratio)
+#                         if best_match: nearest_match_name = best_match[0]
+                
+#                 staged_products.append({
+#                     "slug": slug, "parsed_name": cleaned_name, "original_url": url, "affiliate_link": affiliate_link,
+#                     "new_sale_price": new_sale_price, "new_regular_price": new_regular_price, "button_text": button_text,
+#                     "status": status, "current_price": current_price, "nearest_match": nearest_match_name,
+#                     "shopee_id": sheet_prod_id, "lazada_id": None, "shop_id": sheet_shop_id, "source": source,
+#                     "matched_db_id": match.get('id') if match else None, "matched_db_slug": match.get('slug') if match else slug
+#                 })
+
+#         elif source == 'lazada':
+#             # --- LAZADA LOGIC (Block-by-Block) ---
+#             # from sheet_parser import clean_product_name_lazada, extract_prices_lazada
+            
+#             row_iterator = iter(grid_data)
+#             for row in row_iterator:
+#                 vals = row.get("values", [])
+#                 if not vals or not vals[0].get("formattedValue"): continue
+                
+#                 if vals[0].get("hyperlink"):
+#                     first_line_text, url = extract_hyperlink_from_cell(vals[0])
+#                     if not url: continue
+                    
+#                     price_lines = [v.get("formattedValue", "") for r in islice(row_iterator, 3) for v in r.get("values", [])]
+                    
+#                     cleaned_name = clean_product_name_lazada(first_line_text)
+#                     new_sale_price, new_regular_price = extract_prices_lazada(price_lines)
+                    
+#                     slug = slugify(cleaned_name)
+#                     affiliate_link = convert_to_affiliate_link(url, slug)
+#                     ids = parse_ecommerce_url(url)
+#                     sheet_prod_id, sheet_shop_id, source_type = ids.get('product_id'), ids.get('shop_id'), ids.get('source')
+                    
+#                     match, status = None, "UNMATCHED"
+#                     if sheet_prod_id and source_type == 'lazada':
+#                         match = lazada_id_map.get(sheet_prod_id)
+#                     if not match: match = name_map.get(cleaned_name.lower())
+                    
+#                     current_price, nearest_match_name = "N/A", None
+#                     if match:
+#                         status, current_price = "MATCHED", match.get('sale_price') or match.get('price', "N/A")
+#                         cleaned_name = match.get('name', cleaned_name)
+#                         slug = match.get('slug', slug)
+#                     else:
+#                         if all_product_names:
+#                             best_match = fuzz_process.extractOne(cleaned_name, all_product_names, scorer=fuzz.token_set_ratio)
+#                             if best_match: nearest_match_name = best_match[0]
+                            
+#                     staged_products.append({
+#                         "slug": slug, "parsed_name": cleaned_name, "original_url": url, "affiliate_link": affiliate_link,
+#                         "new_sale_price": new_sale_price, "new_regular_price": new_regular_price, "button_text": "Buy on Lazada",
+#                         "status": status, "current_price": current_price, "nearest_match": nearest_match_name,
+#                         "shopee_id": None, "lazada_id": sheet_prod_id, "shop_id": sheet_shop_id, "source": source,
+#                         "matched_db_id": match.get('id') if match else None, "matched_db_slug": match.get('slug') if match else slug
+#                     })
+
+#         # --- 5. Save to Redis ---
+#         redis_client.set(result_key, json.dumps(staged_products), ex=3600)
+#         final_status = {"job_id": job_id, "status": "complete", "result_key": result_key, "message": f"Staged {len(staged_products)} products."}
+#         redis_client.set(job_key, json.dumps(final_status), ex=3600)
+
+#     except Exception as e:
+#         log_terminal(f"❌ [IMPORTER] FAILED for job {job_id}. Error: {e}")
+#         raise e
 
 # @celery_app.task(bind=True)
 # def update_woocommerce_products_task(self, job_id: str, approved_products: list):
