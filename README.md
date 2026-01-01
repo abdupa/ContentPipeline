@@ -47,3 +47,13 @@ This project is built on a **Distributed Microservices Architecture** to ensure 
    ```bash
    git clone [https://github.com/abdupa/ContentPipeline.git](https://github.com/abdupa/ContentPipeline.git)
    cd ContentPipeline
+
+---
+
+## ⚖️ Disclaimer & Usage
+This repository is intended for **portfolio and educational purposes**. 
+
+- **Security:** Ensure that you do not commit your own `.env` files or API secrets when forking this project.
+- **Costs:** This system utilizes the OpenAI API; the user is responsible for all costs associated with LLM token usage.
+- **Compliance:** When using the scraping modules, ensure compliance with the target website's `robots.txt` and Terms of Service.
+- **No Warranty:** The software is provided "as is", without warranty of any kind.
