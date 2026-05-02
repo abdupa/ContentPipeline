@@ -237,6 +237,7 @@ Status meanings:
 | Code Validated | Add live Woo search fallback for manual link | Manual-link search uses local `product_database.json` first and live WooCommerce search when local results are thin. Needs UI retest with a product missing from local cache. |
 | Live Sync Validated | Backfill affiliate diagnostics for stored source URLs | Existing linked sources such as old Shopee data are labeled during sync without regenerating affiliate URLs. Real sync report showed old Shopee winners as valid. |
 | Workflow Validated | Add candidate bucket for unmatched staged products | Unmatched Lazada row saved to `product_candidates.json` and displayed in Tools Candidate Bucket with affiliate status. |
+| Workflow Validated | Add candidate management controls | Candidate Bucket supports editing canonical name, type tag, status, notes, and linked Woo ID without mutating WooCommerce. Save/persist workflow validated. |
 | Pending | Add candidate-to-phone-scraper handoff | Use existing phone scraper for approved phone candidates when a supported spec source URL is available. |
 | Pending | Add canonical product-name reference list | Use as a review aid for staged/candidate products while keeping marketplace product ID as the primary mapping key. |
 | Pending | Optimize full product database refresh | Replace per-product fetch/sleep flow with paged field fetch, chunked saves, progress, and cancellation. |
@@ -264,4 +265,6 @@ Use this section for new findings as review continues.
 - Phase 2A implementation: Added Product Candidate Bucket storage and UI for unmatched staged products. Bucketed rows are intentionally excluded from WooCommerce sync.
 - QA-PI-013 workflow validation: Candidate Bucket displayed `Samsung Galaxy Buds4` from Lazada with source product ID, price, valid affiliate status, nearest match, and updated timestamp.
 - Added Candidate Bucket placeholder action `Scrape Later` for the future phone/spec scraper handoff. This is intentionally disabled and has no backend behavior yet.
+- Phase 2B implementation: Added review-only candidate management fields for canonical name, type tag, status, notes, and linked Woo product. These updates are stored only in `product_candidates.json`.
+- QA-PI-014 workflow validation: Candidate management saved `Samsung Galaxy Buds4` as status `researching`, type `earbuds`, with note `Test note` and updated timestamp.
 ```

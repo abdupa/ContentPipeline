@@ -198,6 +198,15 @@ class CandidateFromStagedPayload(BaseModel):
     job_id: str
     product: StagedProduct
 
+class CandidateUpdatePayload(BaseModel):
+    canonical_name: Optional[str] = None
+    notes: Optional[str] = None
+    tags: Optional[List[str]] = None
+    status: Optional[str] = None
+    linked_wc_id: Optional[int] = None
+    linked_wc_name: Optional[str] = None
+    linked_wc_slug: Optional[str] = None
+
 class ProcessStagedPayload(BaseModel):
     job_id: str
     approved_products: List[StagedProduct]
@@ -1516,6 +1525,24 @@ def candidate_key_for(product: Dict[str, Any]) -> str:
     shop_id = product.get("shop_id") or "shop"
     return f"{source}:{source_product_id}:{shop_id}"
 
+ALLOWED_CANDIDATE_STATUSES = {
+    "candidate",
+    "researching",
+    "ready_for_scraper",
+    "linked_existing",
+    "rejected"
+}
+
+ALLOWED_CANDIDATE_TAGS = {
+    "phone",
+    "tablet",
+    "accessory",
+    "watch",
+    "earbuds",
+    "charger",
+    "unknown"
+}
+
 @app.get("/api/product-candidates")
 async def get_product_candidates():
     """
@@ -1575,6 +1602,42 @@ async def create_product_candidate_from_staged(payload: CandidateFromStagedPaylo
 
     save_product_candidates(candidates)
     return candidate_data
+
+@app.patch("/api/product-candidates/{candidate_id}")
+async def update_product_candidate(candidate_id: str, payload: CandidateUpdatePayload):
+    """
+    Updates review-only candidate metadata.
+    This does not mutate WooCommerce or product_database.json.
+    """
+    log_terminal(f"--- HIT: PATCH /api/product-candidates/{candidate_id} ---")
+    candidates = load_product_candidates()
+    candidate = next((item for item in candidates if item.get("candidate_id") == candidate_id), None)
+    if not candidate:
+        raise HTTPException(status_code=404, detail="Product candidate not found.")
+
+    updates = payload.dict(exclude_unset=True)
+
+    if "status" in updates and updates["status"] not in ALLOWED_CANDIDATE_STATUSES:
+        raise HTTPException(status_code=400, detail="Invalid candidate status.")
+
+    if "tags" in updates:
+        tags = updates.get("tags") or []
+        if not isinstance(tags, list):
+            raise HTTPException(status_code=400, detail="tags must be a list.")
+        invalid_tags = [tag for tag in tags if tag not in ALLOWED_CANDIDATE_TAGS]
+        if invalid_tags:
+            raise HTTPException(status_code=400, detail=f"Invalid candidate tag(s): {', '.join(invalid_tags)}")
+
+    for field in ["canonical_name", "notes", "tags", "status", "linked_wc_id", "linked_wc_name", "linked_wc_slug"]:
+        if field in updates:
+            candidate[field] = updates[field]
+
+    if candidate.get("linked_wc_id") and candidate.get("status") == "candidate":
+        candidate["status"] = "linked_existing"
+
+    candidate["updated_at"] = datetime.now(timezone.utc).isoformat()
+    save_product_candidates(candidates)
+    return candidate
 
 @app.post("/api/import/google-sheet", response_model=JobCreationResponse)
 async def import_from_google_sheet(payload: dict):

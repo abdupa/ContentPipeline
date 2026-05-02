@@ -26,6 +26,7 @@ Validation levels:
 | QA-PI-011 | Manual link live Woo fallback | Code Validated | 2026-05-02 | Local cache miss can search live WooCommerce. Needs UI retest with `Samsung Galaxy S26 Ultra`. |
 | QA-PI-012 | Stored source affiliate diagnostics backfill | Live Sync Validated | 2026-05-02 | Existing Shopee winning source showed `Valid` in Sync Report and WooCommerce meta. |
 | QA-PI-013 | Candidate bucket save | Workflow Validated | 2026-05-02 | Unmatched Lazada row saved to Candidate Bucket and displayed with affiliate status. |
+| QA-PI-014 | Candidate management | Workflow Validated | 2026-05-02 | Candidate status/type/notes save and persist in Candidate Bucket. |
 
 ## Shared Setup
 
@@ -386,6 +387,48 @@ Sync excluded bucketed row:
 Notes:
 ```
 
+## QA-PI-014: Candidate Management
+
+Purpose: prove candidate review fields can be managed without mutating WooCommerce.
+
+Steps:
+
+1. Open `Tools`.
+2. Open `Candidate Bucket`.
+3. Edit a candidate canonical name.
+4. Select a type tag, such as `earbuds` or `phone`.
+5. Change status, such as `researching` or `linked_existing`.
+6. Add notes.
+7. Search and select an existing live Woo product in the Woo Link field.
+8. Click `Save`.
+9. Refresh or leave/reopen Candidate Bucket.
+
+Pass criteria:
+
+- Canonical name persists.
+- Type tag persists.
+- Status persists.
+- Notes persist.
+- Linked Woo product ID/name persists.
+- No WooCommerce price, URL, meta, or product record is changed by this save.
+- Disabled `Scrape Later` button remains non-functional.
+
+Evidence to record:
+
+```text
+Date:
+Branch:
+Commit:
+Candidate ID:
+Canonical name:
+Type tag:
+Status:
+Linked Woo ID:
+Notes persisted:
+Woo mutation checked:
+Notes:
+```
+
 ## QA-PI-006: Importer Failure Status
 
 Purpose: prove importer failures update Redis job status to `failed`.
@@ -651,6 +694,26 @@ Branch: audit-price-ingestion-refinements
 Commit: pending
 Evidence: Candidate Bucket screenshot showed unmatched Lazada candidate `Samsung Galaxy Buds4` with source product ID `5411480006`, regular price `₱11,490`, affiliate status `Valid`, nearest match `samsung galaxy buds3`, and updated timestamp.
 Notes: Confirms unmatched staged row can be saved and reviewed without WooCommerce sync.
+```
+
+```text
+Date: 2026-05-02
+Ref: QA-PI-014
+Result: Code Validated
+Branch: audit-price-ingestion-refinements
+Commit: pending
+Evidence: Added `PATCH /api/product-candidates/{candidate_id}` and editable Candidate Bucket controls for canonical name, type tag, status, notes, and linked Woo product.
+Notes: Needs UI workflow validation before marking Workflow Validated.
+```
+
+```text
+Date: 2026-05-02
+Ref: QA-PI-014
+Result: Workflow Validated
+Branch: audit-price-ingestion-refinements
+Commit: pending
+Evidence: Candidate Bucket screenshot confirmed `Samsung Galaxy Buds4` saved with status `researching`, type `earbuds`, note `Test note`, and updated timestamp after clicking Save.
+Notes: Confirms candidate management persists review metadata without enabling scraper handoff.
 ```
 
 ```text
