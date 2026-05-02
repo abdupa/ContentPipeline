@@ -2,6 +2,50 @@ import React, { useState, useEffect } from 'react';
 import { Loader2, CheckCircle, XCircle, AlertTriangle, FileText, ArrowLeft } from 'lucide-react';
 import apiClient from '../apiClient';
 
+const formatPrice = (value) => {
+  if (value === null || value === undefined || value === '') return 'N/A';
+  const parsed = Number(value);
+  if (Number.isNaN(parsed)) return String(value);
+  return `₱${parsed.toLocaleString('en-PH', {
+    minimumFractionDigits: parsed % 1 === 0 ? 0 : 2,
+    maximumFractionDigits: 2
+  })}`;
+};
+
+const getPriceDelta = (before, after) => {
+  const beforeNum = Number(before);
+  const afterNum = Number(after);
+  if (Number.isNaN(beforeNum) || Number.isNaN(afterNum)) return null;
+  return afterNum - beforeNum;
+};
+
+const PriceChange = ({ before, after }) => {
+  const delta = getPriceDelta(before, after);
+  const deltaClass = delta === null || delta === 0
+    ? 'text-gray-500'
+    : delta > 0
+      ? 'text-red-600'
+      : 'text-green-700';
+  const deltaLabel = delta === null
+    ? null
+    : `${delta > 0 ? '+' : ''}${formatPrice(delta)}`;
+
+  return (
+    <div className="min-w-[150px]">
+      <div className="flex flex-wrap items-center gap-1.5 text-sm">
+        <span className="font-medium text-gray-500">{formatPrice(before)}</span>
+        <span className="text-gray-400">→</span>
+        <span className="font-semibold text-gray-900">{formatPrice(after)}</span>
+      </div>
+      {deltaLabel && (
+        <div className={`mt-1 text-xs font-semibold ${deltaClass}`}>
+          {delta === 0 ? 'No price change' : deltaLabel}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const SyncReportView = ({ jobId, onBack }) => {
   const [report, setReport] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -93,6 +137,10 @@ const SyncReportView = ({ jobId, onBack }) => {
             </div>
             <h2 className="break-words text-sm font-semibold text-gray-900">{item.name}</h2>
             <p className="mt-1 break-all font-mono text-xs text-gray-500">WC ID: {item.wc_id}</p>
+            <div className="mt-3 rounded-md bg-gray-50 p-3">
+              <p className="mb-1 text-[11px] font-bold uppercase text-gray-500">Price Change</p>
+              <PriceChange before={item.price_before} after={item.price_after} />
+            </div>
             <p className="mt-3 whitespace-pre-wrap break-words text-sm text-gray-600">{item.details}</p>
           </article>
         ))}
@@ -103,8 +151,9 @@ const SyncReportView = ({ jobId, onBack }) => {
           <thead className="bg-gray-50">
             <tr>
               <th className="p-4 text-left text-xs font-bold text-gray-600 uppercase w-12">#</th>
-              <th className="p-4 text-left text-xs font-bold text-gray-600 uppercase w-1/2">Product Name</th>
+              <th className="p-4 text-left text-xs font-bold text-gray-600 uppercase">Product Name</th>
               <th className="p-4 text-left text-xs font-bold text-gray-600 uppercase">Status</th>
+              <th className="p-4 text-left text-xs font-bold text-gray-600 uppercase">Price Change</th>
               <th className="p-4 text-left text-xs font-bold text-gray-600 uppercase">Details</th>
             </tr>
           </thead>
@@ -121,6 +170,9 @@ const SyncReportView = ({ jobId, onBack }) => {
                     {getStatusIcon(item.status)}
                     <span className="ml-2">{item.status}</span>
                   </span>
+                </td>
+                <td className="p-4 text-sm text-gray-700">
+                  <PriceChange before={item.price_before} after={item.price_after} />
                 </td>
                 <td className="p-4 text-sm text-gray-600 break-words">{item.details}</td>
               </tr>

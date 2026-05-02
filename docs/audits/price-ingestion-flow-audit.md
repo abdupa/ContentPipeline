@@ -68,6 +68,7 @@ Do not change the matching hierarchy without explicit approval:
 - Duplicate marketplace IDs in sheets should be detected and surfaced.
 - Skipped rows should produce diagnostics, such as no URL, no parsed product ID, no price, unsupported source, or duplicate ID.
 - Audit report should include source, match method, marketplace product ID, shop ID, winning source, price before, and price after.
+- Sync Report should make price changes immediately visible with `before -> after` and delta, not only status/details text.
 - Manual link currently mutates `slug` in the frontend; row identity would be safer with a stable row key.
 - Out-of-stock behavior should be confirmed as a business rule.
 - Generic importer route should either infer/select source or be removed from active workflows.

@@ -18,7 +18,7 @@ Validation levels:
 | QA-PI-003 | Lazada importer staging | Deferred | Not run | Requires running real Tools importer. |
 | QA-PI-004 | Review UI diagnostics | Failed, fix in progress | 2026-05-02 | Lazada staged review showed matched rows with `Matched By = Unmatched`; frontend display fallback added. Needs retest. |
 | QA-PI-009 | Lazada product name normalization | Code Validated | 2026-05-02 | Sample parser check normalized noisy Lazada names such as `vivo Y05 mobilephone|...` to `vivo Y05`. Needs real importer retest. |
-| QA-PI-005 | Audit `price_before` report | Deferred | Not run | Requires syncing a safe product and checking Sync Report. |
+| QA-PI-005 | Audit `price_before` report | Code Validated | 2026-05-02 | Sync Report now displays before/after price and delta. Needs real report retest. |
 | QA-PI-006 | Importer failure status | Deferred | Not run | Requires bad sheet/source test. |
 | QA-PI-007 | Unlink/reset mapping | Deferred | Not run | Requires safe WooCommerce product ID. |
 | QA-PI-008 | WooCommerce live sync inspection | Deferred | Not run | Requires live sync and `data_tasks.py WOO_PRODUCT_ID`. |
@@ -208,6 +208,8 @@ Pass criteria:
 - Report shows `Synced` when the numeric value is effectively the same.
 - `price_before` equals the pre-sync price.
 - `price_after` equals the winning Shopee/Lazada price.
+- Sync Report displays a visible `Price Change` value in `before -> after` format.
+- Sync Report displays a delta, including `No price change` for unchanged prices.
 
 Evidence to record:
 
@@ -221,6 +223,7 @@ Source:
 Price before:
 Price after:
 Report status:
+Price change display:
 Notes:
 ```
 
