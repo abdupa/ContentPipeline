@@ -68,13 +68,19 @@ Fallback mapping currently exists by exact cleaned product name. Fuzzy matching 
 
 ## Implementation Tracker
 
+Status meanings:
+
+- `Code Validated`: implementation is committed and compile/build checks passed.
+- `Workflow Validated`: local UI/backend workflow was executed successfully.
+- `Live Sync Validated`: WooCommerce was updated and inspected successfully.
+
 | Status | Item | Notes |
 | --- | --- | --- |
-| Done | Fix audit `price_before` capture | Captures old price before updating `local_prod_to_update`; comparison is numeric-tolerant. |
-| Done | Set importer job to failed on exception | Updates Redis `job:{job_id}` in importer `except` block. |
-| Done | Fix unlink route mismatch | Frontend uses `/api/unlink-product`; backend accepts hyphen and underscore routes. |
-| Done | Fix or disable generic Google Sheet importer | Generic route validates `source` as `shopee` or `lazada`. |
-| Done | Add source/match fields to staged rows | Tracks `matched_by`: marketplace_id, exact_name, manual_link, unmatched; review UI displays it. |
+| Code Validated | Fix audit `price_before` capture | Captures old price before updating `local_prod_to_update`; comparison is numeric-tolerant. Needs live sync report verification. |
+| Code Validated | Set importer job to failed on exception | Updates Redis `job:{job_id}` in importer `except` block. Needs importer failure test. |
+| Code Validated | Fix unlink route mismatch | Frontend uses `/api/unlink-product`; backend accepts hyphen and underscore routes. Needs reset action test against a safe product. |
+| Code Validated | Fix or disable generic Google Sheet importer | Generic route validates `source` as `shopee` or `lazada`. Needs endpoint/manual request test if generic path remains in use. |
+| Code Validated | Add source/match fields to staged rows | Tracks `matched_by`: marketplace_id, exact_name, manual_link, unmatched; review UI displays it. Needs staged review check with real Shopee/Lazada rows. |
 | Pending | Add duplicate ID detection | Detect same source/product ID across In Stock and Sold Out. |
 | Pending | Add skipped-row diagnostics | Store summary in job status or a related Redis key. |
 | Pending | Strengthen Shopee keying | Prefer product ID plus shop ID if local data supports it. |

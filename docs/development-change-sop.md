@@ -78,6 +78,15 @@ Keep payload compatibility unless intentionally changing a contract.
 
 ## 5. Validate Locally
 
+Treat validation as levels, not one generic "pass":
+
+- **Code validated** means syntax/build checks passed.
+- **UI validated** means the relevant screen was opened and inspected at target viewport sizes.
+- **Workflow validated** means the actual user flow was executed against the local app or Docker stack.
+- **Live sync validated** means the workflow touched the external service it claims to update, such as WooCommerce, and the result was verified.
+
+Do not mark a high-risk task as fully done if only code validation passed. Record the highest validation level reached in the audit tracker or final notes.
+
 Frontend:
 
 ```bash
@@ -136,6 +145,34 @@ Check at minimum:
 - Product names do not hide price fields or actions.
 - Buttons do not overflow.
 - Submitted payload still includes approved products with `matched_db_id` or `linked_db_id`.
+
+For Shopee/Lazada price ingestion changes, validate the backend workflow in stages:
+
+```text
+1. Run importer from Tools, or source-specific endpoint.
+2. Confirm job status becomes complete or failed, never stuck.
+3. Open Review Staged Updates.
+4. Confirm each row has source, marketplace ID, stock status, matched_by, current price, and new prices.
+5. Approve a safe small set or test product.
+6. Sync to WooCommerce.
+7. Confirm Sync Report shows correct price_before and price_after.
+8. Inspect WooCommerce product by WooCommerce product ID.
+```
+
+Suggested inspector command:
+
+```bash
+docker-compose exec backend python data_tasks.py WOO_PRODUCT_ID
+```
+
+Important: this command expects the WooCommerce product ID, not the Shopee or Lazada marketplace product ID.
+
+Minimum evidence for "live sync validated":
+
+- Job status finished as `complete`.
+- Audit log/report has the expected product and price delta.
+- WooCommerce product `price`, `regular_price`, `sale_price`, `external_url`, and source `meta_data` match the expected winning source.
+- No unintended product was changed.
 
 ## 7. Update Audit/Tracker
 
