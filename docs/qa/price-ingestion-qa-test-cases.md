@@ -25,6 +25,7 @@ Validation levels:
 | QA-PI-010 | Affiliate URL diagnostics | Live Sync Validated | 2026-05-02 | Review/sync UI and WooCommerce meta confirmed valid Shopee/Lazada affiliate diagnostics. |
 | QA-PI-011 | Manual link live Woo fallback | Code Validated | 2026-05-02 | Local cache miss can search live WooCommerce. Needs UI retest with `Samsung Galaxy S26 Ultra`. |
 | QA-PI-012 | Stored source affiliate diagnostics backfill | Live Sync Validated | 2026-05-02 | Existing Shopee winning source showed `Valid` in Sync Report and WooCommerce meta. |
+| QA-PI-013 | Candidate bucket save | Workflow Validated | 2026-05-02 | Unmatched Lazada row saved to Candidate Bucket and displayed with affiliate status. |
 
 ## Shared Setup
 
@@ -340,6 +341,51 @@ Affiliate badge:
 Notes:
 ```
 
+## QA-PI-013: Candidate Bucket Save
+
+Purpose: prove unmatched staged marketplace products can be preserved for later research without syncing them to WooCommerce.
+
+Steps:
+
+1. Run Shopee or Lazada importer.
+2. Open `Review Staged Updates`.
+3. Find an unmatched row.
+4. Click `Add to Bucket`.
+5. Open `Tools`.
+6. Click `Candidate Bucket`.
+7. Confirm the candidate appears.
+8. Sync approved rows, if safe.
+
+Pass criteria:
+
+- Unmatched row changes to a candidate/bucketed state.
+- Candidate persists after navigating away and back.
+- Candidate includes:
+  - source
+  - marketplace product ID
+  - parsed/canonical name
+  - original URL
+  - affiliate URL/status
+  - regular/sale price
+  - stock status
+  - import job ID
+- Bucketed row is not included in WooCommerce sync.
+
+Evidence to record:
+
+```text
+Date:
+Branch:
+Commit:
+Import job ID:
+Source:
+Candidate ID:
+Marketplace product ID:
+Affiliate badge:
+Sync excluded bucketed row:
+Notes:
+```
+
 ## QA-PI-006: Importer Failure Status
 
 Purpose: prove importer failures update Redis job status to `failed`.
@@ -585,6 +631,26 @@ Branch: audit-price-ingestion-refinements
 Commit: pending
 Evidence: Added sync-time diagnostics derivation from stored source `affiliate_url` when `affiliate_diagnostics` is absent.
 Notes: Needs real sync retest where `Winner: Shopee` appears during a Lazada import sync.
+```
+
+```text
+Date: 2026-05-02
+Ref: QA-PI-013
+Result: Code Validated
+Branch: audit-price-ingestion-refinements
+Commit: pending
+Evidence: Added `/api/product-candidates`, `/api/product-candidates/from-staged`, Review UI `Add to Bucket`, and Tools Candidate Bucket view.
+Notes: Needs real staged-row validation before marking Workflow Validated.
+```
+
+```text
+Date: 2026-05-02
+Ref: QA-PI-013
+Result: Workflow Validated
+Branch: audit-price-ingestion-refinements
+Commit: pending
+Evidence: Candidate Bucket screenshot showed unmatched Lazada candidate `Samsung Galaxy Buds4` with source product ID `5411480006`, regular price `₱11,490`, affiliate status `Valid`, nearest match `samsung galaxy buds3`, and updated timestamp.
+Notes: Confirms unmatched staged row can be saved and reviewed without WooCommerce sync.
 ```
 
 ```text

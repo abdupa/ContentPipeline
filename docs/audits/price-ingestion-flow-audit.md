@@ -63,6 +63,7 @@ Do not change the matching hierarchy without explicit approval:
 - Fixed 2026-05-02: staged rows and sync audit entries now carry affiliate diagnostics, and WooCommerce meta receives source-specific affiliate status/detail fields.
 - Fixed 2026-05-02: `backend/main.py` now preserves `affiliate_diagnostics` in staged data responses/payloads and provides live WooCommerce product search as a manual-link fallback when `product_database.json` is stale.
 - Fixed 2026-05-02: sync now derives affiliate diagnostics from existing stored source URLs when older linked source data does not yet have diagnostics.
+- Added 2026-05-02: Phase 2A candidate bucket foundation lets unmatched staged rows be saved for later review without syncing them to WooCommerce.
 
 ## Enhancement Gaps
 
@@ -235,7 +236,7 @@ Status meanings:
 | Live Sync Validated | Add affiliate URL validation diagnostics | Staging, review UI, sync report, local source data, and WooCommerce meta surface valid Shopee/Lazada affiliate status/detail. |
 | Code Validated | Add live Woo search fallback for manual link | Manual-link search uses local `product_database.json` first and live WooCommerce search when local results are thin. Needs UI retest with a product missing from local cache. |
 | Live Sync Validated | Backfill affiliate diagnostics for stored source URLs | Existing linked sources such as old Shopee data are labeled during sync without regenerating affiliate URLs. Real sync report showed old Shopee winners as valid. |
-| Pending | Add candidate bucket for unmatched staged products | Preserve new products for research/scraper handoff instead of only ignore/manual link. |
+| Workflow Validated | Add candidate bucket for unmatched staged products | Unmatched Lazada row saved to `product_candidates.json` and displayed in Tools Candidate Bucket with affiliate status. |
 | Pending | Add candidate-to-phone-scraper handoff | Use existing phone scraper for approved phone candidates when a supported spec source URL is available. |
 | Pending | Add canonical product-name reference list | Use as a review aid for staged/candidate products while keeping marketplace product ID as the primary mapping key. |
 | Pending | Optimize full product database refresh | Replace per-product fetch/sleep flow with paged field fetch, chunked saves, progress, and cancellation. |
@@ -260,4 +261,6 @@ Use this section for new findings as review continues.
 - QA follow-up: Real Lazada QA exposed two gaps: `StagedProduct` response filtering removed `affiliate_diagnostics`, and manual-link search could not find live Woo products missing from stale `product_database.json`. Added backend model field and live Woo search fallback.
 - QA follow-up: Real sync report showed `Affiliate URL = Not Checked` when an older Shopee linked source won during a Lazada sync. Added stored URL diagnostics backfill so old winning source URLs are inspected instead of reported as unchecked.
 - Live validation: WooCommerce meta confirmed `_shopee_affiliate_status = valid`, `_shopee_affiliate_detail = Shopee affiliate parameters are present.`, `_lazada_affiliate_status = valid`, and `_lazada_affiliate_detail = Lazada affiliate parameters are present.`
+- Phase 2A implementation: Added Product Candidate Bucket storage and UI for unmatched staged products. Bucketed rows are intentionally excluded from WooCommerce sync.
+- QA-PI-013 workflow validation: Candidate Bucket displayed `Samsung Galaxy Buds4` from Lazada with source product ID, price, valid affiliate status, nearest match, and updated timestamp.
 ```

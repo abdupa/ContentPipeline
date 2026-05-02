@@ -17,6 +17,7 @@ import InsightsView from './components/InsightsView.jsx';
 import ToolsView from './components/ToolsView.jsx';
 import PriceUpdateReviewView from './components/PriceUpdateReviewView.jsx';
 import SyncReportView from './components/SyncReportView.jsx';
+import ProductCandidateBucketView from './components/ProductCandidateBucketView.jsx';
 import { HelpCircle, Bell, ChevronDown } from 'lucide-react';
 
 const App = () => {
@@ -97,7 +98,7 @@ const App = () => {
         if (origin === 'tools') return 'Tools';
         return 'Scraping Projects';
     }
-    if (currentView === 'priceReview' || currentView === 'syncReport') return 'Tools';
+    if (currentView === 'priceReview' || currentView === 'syncReport' || currentView === 'candidateBucket') return 'Tools';
     if (currentView === 'dashboard') return 'Dashboard';
     if (currentView === 'insights') return 'Insights';
     if (currentView === 'performance') return 'Performance';
@@ -131,12 +132,13 @@ const App = () => {
       case 'manualEditor': return <ManualEditorView onJobStarted={(jobId) => onJobStarted(jobId, 'manualEditor')} />;
       case 'priceReview': return <PriceUpdateReviewView jobId={activeJobId} onJobStarted={onJobStarted} onBack={() => setCurrentView('tools')} />;
       case 'syncReport': return <SyncReportView jobId={activeJobId} onBack={() => setCurrentView('scrapeJobStatus')} />;
+      case 'candidateBucket': return <ProductCandidateBucketView onBack={() => setCurrentView('tools')} />;
       case 'productDatabase': return <ProductDatabaseView />;
       case 'publishedPosts': return <PublishedPostsView onEditDraft={handleEditDraft} />;
       case 'allPosts': return <AllPostsView onEditDraft={handleEditDraft} />;
       case 'approvalQueue': return <ApprovalQueueView onEditDraft={handleEditDraft} />;
       case 'actionHistory': return <ActionHistoryView />;
-      case 'tools': return <ToolsView onJobStarted={onJobStarted} onNavigateToReview={(jobId) => { setActiveJobId(jobId); setCurrentView('priceReview'); }} />;
+      case 'tools': return <ToolsView onJobStarted={onJobStarted} onNavigateToReview={(jobId) => { setActiveJobId(jobId); setCurrentView('priceReview'); }} onNavigateToCandidates={() => setCurrentView('candidateBucket')} />;
       case 'settings': return <SettingsView />;
       case 'contentEditor': return <ContentEditorView draftId={draftToEditId} onBack={() => setCurrentView('approvalQueue')} />;
       default: return <DashboardView />;

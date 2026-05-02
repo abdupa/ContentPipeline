@@ -91,9 +91,11 @@ const denseInputClass = 'w-full min-w-0 rounded border border-gray-300 px-2 py-1
 const priceInputClass = `${denseInputClass} text-right`;
 
 const StatusBadge = ({ status, action }) => {
-  const label = action === 'link' ? 'MANUAL LINK' : status;
+  const label = action === 'link' ? 'MANUAL LINK' : action === 'bucket' ? 'CANDIDATE' : status;
   const color = action === 'link' || status === 'MATCHED'
     ? 'bg-green-100 text-green-800'
+    : action === 'bucket'
+      ? 'bg-indigo-100 text-indigo-800'
     : status === 'UNMATCHED'
       ? 'bg-blue-100 text-blue-800'
       : 'bg-gray-100 text-gray-800';
@@ -169,7 +171,7 @@ const DetailLine = ({ label, value, mono = false }) => (
   </div>
 );
 
-const UnmatchedActionCell = ({ product, dbCache, onLinkProduct, onSetAction }) => {
+const UnmatchedActionCell = ({ product, dbCache, onLinkProduct, onSetAction, onAddToBucket }) => {
   const [searchQuery, setSearchQuery] = useState(product.nearest_match || product.parsed_name);
   const [isActive, setIsActive] = useState(false);
   const [liveResults, setLiveResults] = useState([]);
@@ -275,6 +277,18 @@ const UnmatchedActionCell = ({ product, dbCache, onLinkProduct, onSetAction }) =
       >
         Ignore
       </button>
+
+      <button
+        onClick={() => onAddToBucket(product)}
+        disabled={product.action === 'bucket'}
+        className={`w-full rounded-md px-3 py-1.5 text-xs font-medium ${
+          product.action === 'bucket'
+            ? 'bg-indigo-100 text-indigo-700'
+            : 'bg-white text-indigo-700 ring-1 ring-inset ring-indigo-200 hover:bg-indigo-50'
+        }`}
+      >
+        {product.action === 'bucket' ? 'Added to Bucket' : 'Add to Bucket'}
+      </button>
     </div>
   );
 };
@@ -301,7 +315,7 @@ const MatchedActionCell = ({ product, onSetAction, onUnlink }) => (
   </div>
 );
 
-const ProductActions = ({ product, dbCache, onSetAction, onLinkProduct, onUnlink }) => (
+const ProductActions = ({ product, dbCache, onSetAction, onLinkProduct, onUnlink, onAddToBucket }) => (
   product.status === 'MATCHED' ? (
     <MatchedActionCell product={product} onSetAction={onSetAction} onUnlink={onUnlink} />
   ) : (
@@ -310,11 +324,12 @@ const ProductActions = ({ product, dbCache, onSetAction, onLinkProduct, onUnlink
       dbCache={dbCache}
       onSetAction={onSetAction}
       onLinkProduct={onLinkProduct}
+      onAddToBucket={onAddToBucket}
     />
   )
 );
 
-const PriceReviewCard = ({ product, index, dbCache, onSetAction, onLinkProduct, onUnlink, onInputChange }) => {
+const PriceReviewCard = ({ product, index, dbCache, onSetAction, onLinkProduct, onUnlink, onInputChange, onAddToBucket }) => {
   const marketplaceId = getMarketplaceId(product);
   const affiliateDiagnostics = getAffiliateDiagnostics(product);
 
@@ -392,6 +407,7 @@ const PriceReviewCard = ({ product, index, dbCache, onSetAction, onLinkProduct, 
           onSetAction={onSetAction}
           onLinkProduct={onLinkProduct}
           onUnlink={onUnlink}
+          onAddToBucket={onAddToBucket}
         />
       </div>
     </article>
@@ -479,6 +495,29 @@ const PriceUpdateReviewView = ({ jobId, onJobStarted, onBack }) => {
     );
   };
 
+  const handleAddToBucket = async (product) => {
+    try {
+      const response = await apiClient.post('/api/product-candidates/from-staged', {
+        job_id: jobId,
+        product
+      });
+      setStagedProducts(prev =>
+        prev.map(p =>
+          p.row_key === product.row_key
+            ? {
+                ...p,
+                action: 'bucket',
+                candidate_id: response.data.candidate_id,
+                candidate_key: response.data.candidate_key
+              }
+            : p
+        )
+      );
+    } catch (err) {
+      alert(`Failed to add candidate. ${err.response?.data?.detail || ''}`);
+    }
+  };
+
   const handleUnlink = async (product) => {
     const productId = product.matched_db_id || product.linked_db_id;
     if (!productId) {
@@ -516,9 +555,9 @@ const PriceUpdateReviewView = ({ jobId, onJobStarted, onBack }) => {
   };
 
   const handleSyncToWooCommerce = async () => {
-    const productsToSync = stagedProducts.filter(p => p.action !== 'ignore');
+    const productsToSync = stagedProducts.filter(p => p.action === 'approve' || p.action === 'link');
     if (productsToSync.length === 0) {
-      alert("Please select an action (like 'Approve' or manually link a product) for at least one item.");
+      alert("Please approve or manually link at least one item before syncing. Bucketed and ignored rows are not synced.");
       return;
     }
     const linkedWithoutId = productsToSync.find(p => p.action === 'link' && !p.linked_db_id);
@@ -604,6 +643,7 @@ const PriceUpdateReviewView = ({ jobId, onJobStarted, onBack }) => {
             onLinkProduct={handleSelectSearchResult}
             onUnlink={handleUnlink}
             onInputChange={handleInputChange}
+            onAddToBucket={handleAddToBucket}
           />
         ))}
       </div>
@@ -640,6 +680,7 @@ const PriceUpdateReviewView = ({ jobId, onJobStarted, onBack }) => {
                       onSetAction={handleActionChange}
                       onLinkProduct={handleSelectSearchResult}
                       onUnlink={handleUnlink}
+                      onAddToBucket={handleAddToBucket}
                     />
                   </td>
                   <td className="px-3 py-3 align-top text-sm text-gray-800">

@@ -194,6 +194,10 @@ class StagedProduct(BaseModel):
     matched_db_slug: Optional[str] = None
     matched_by: Optional[str] = None
 
+class CandidateFromStagedPayload(BaseModel):
+    job_id: str
+    product: StagedProduct
+
 class ProcessStagedPayload(BaseModel):
     job_id: str
     approved_products: List[StagedProduct]
@@ -1484,6 +1488,93 @@ async def search_live_products(q: str = Query(..., min_length=3), limit: int = Q
     except Exception as e:
         log_terminal(f"❌ ERROR searching live WooCommerce products: {e}")
         raise HTTPException(status_code=500, detail="Failed to search WooCommerce products.")
+
+CANDIDATE_BUCKET_PATH = "product_candidates.json"
+
+def load_product_candidates() -> List[Dict[str, Any]]:
+    try:
+        with open(CANDIDATE_BUCKET_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, list) else []
+    except FileNotFoundError:
+        return []
+    except Exception as e:
+        log_terminal(f"❌ ERROR reading {CANDIDATE_BUCKET_PATH}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to read product candidates.")
+
+def save_product_candidates(candidates: List[Dict[str, Any]]) -> None:
+    try:
+        with open(CANDIDATE_BUCKET_PATH, "w", encoding="utf-8") as f:
+            json.dump(candidates, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        log_terminal(f"❌ ERROR writing {CANDIDATE_BUCKET_PATH}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save product candidates.")
+
+def candidate_key_for(product: Dict[str, Any]) -> str:
+    source = product.get("source") or "source"
+    source_product_id = product.get("shopee_id") or product.get("lazada_id") or product.get("slug") or "unknown"
+    shop_id = product.get("shop_id") or "shop"
+    return f"{source}:{source_product_id}:{shop_id}"
+
+@app.get("/api/product-candidates")
+async def get_product_candidates():
+    """
+    Returns unmatched marketplace products saved for later research/product creation.
+    """
+    log_terminal("--- HIT: GET /api/product-candidates ---")
+    return load_product_candidates()
+
+@app.post("/api/product-candidates/from-staged", status_code=201)
+async def create_product_candidate_from_staged(payload: CandidateFromStagedPayload):
+    """
+    Saves an unmatched staged price row into the Product Candidate Bucket.
+    This does not sync anything to WooCommerce.
+    """
+    log_terminal(f"--- HIT: POST /api/product-candidates/from-staged job={payload.job_id} ---")
+    product = payload.product.dict()
+    source = product.get("source")
+    source_product_id = product.get("shopee_id") or product.get("lazada_id")
+    if not source or not source_product_id:
+        raise HTTPException(status_code=400, detail="Candidate requires source and marketplace product ID.")
+
+    candidates = load_product_candidates()
+    candidate_key = candidate_key_for(product)
+    now = datetime.now(timezone.utc).isoformat()
+
+    existing = next((item for item in candidates if item.get("candidate_key") == candidate_key), None)
+    candidate_data = {
+        "candidate_key": candidate_key,
+        "candidate_id": existing.get("candidate_id") if existing else f"cand_{uuid.uuid4().hex[:10]}",
+        "source": source,
+        "source_product_id": source_product_id,
+        "shop_id": product.get("shop_id"),
+        "raw_name": product.get("raw_name") or product.get("parsed_name"),
+        "parsed_name": product.get("parsed_name"),
+        "canonical_name": existing.get("canonical_name") if existing else product.get("parsed_name"),
+        "original_url": product.get("original_url"),
+        "affiliate_link": product.get("affiliate_link"),
+        "affiliate_diagnostics": product.get("affiliate_diagnostics") or {},
+        "new_sale_price": product.get("new_sale_price"),
+        "new_regular_price": product.get("new_regular_price"),
+        "stock_status": product.get("stock_status"),
+        "nearest_match": product.get("nearest_match"),
+        "matched_by": product.get("matched_by"),
+        "import_job_id": payload.job_id,
+        "status": existing.get("status") if existing else "candidate",
+        "tags": existing.get("tags") if existing else [],
+        "notes": existing.get("notes") if existing else "",
+        "linked_wc_id": existing.get("linked_wc_id") if existing else None,
+        "created_at": existing.get("created_at") if existing else now,
+        "updated_at": now
+    }
+
+    if existing:
+        existing.update(candidate_data)
+    else:
+        candidates.insert(0, candidate_data)
+
+    save_product_candidates(candidates)
+    return candidate_data
 
 @app.post("/api/import/google-sheet", response_model=JobCreationResponse)
 async def import_from_google_sheet(payload: dict):

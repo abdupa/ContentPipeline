@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { Wrench, HardHat, Loader2, Table } from 'lucide-react';
+import { Wrench, HardHat, Loader2, Table, PackageSearch } from 'lucide-react';
 import apiClient from '../apiClient';
 
-const ToolsView = ({ onJobStarted, onNavigateToReview }) => {
+const ToolsView = ({ onJobStarted, onNavigateToReview, onNavigateToCandidates }) => {
   // State for WordPress Inspector
   const [url, setUrl] = useState('');
   const [username, setUsername] = useState('');
@@ -96,6 +96,14 @@ const ToolsView = ({ onJobStarted, onNavigateToReview }) => {
             Run the importers to fetch the latest prices from your hardcoded Shopee and Lazada Google Sheets.
           </p>
           <div className="border-t pt-4 flex flex-col sm:flex-row sm:justify-end gap-3">
+            <button
+              onClick={onNavigateToCandidates}
+              disabled={isImporting}
+              className="inline-flex w-full sm:w-auto items-center justify-center px-5 py-2 bg-gray-700 text-white font-semibold rounded-md shadow-sm hover:bg-gray-800 disabled:bg-gray-400"
+            >
+              <PackageSearch className="w-5 h-5 mr-2" />
+              Candidate Bucket
+            </button>
             {/* --- Shopee Button --- */}
             <button 
               onClick={handleShopeeImport} // We will create this handler next
