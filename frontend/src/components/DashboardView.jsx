@@ -3,6 +3,7 @@ import { FileText, Edit, CheckSquare, Clock, Search, XCircle, BarChart2, AlertTr
 import apiClient from '../apiClient';
 import EnhancedLineChart from './EnhancedLineChart.jsx';
 import StatCard from './StatCard.jsx';
+import PriceIntegrityWidget from './PriceIntegrityWidget.jsx';
 
 const DashboardView = ({ handleMenuItemClick }) => {
   const [stats, setStats] = useState(null);
@@ -48,12 +49,12 @@ const DashboardView = ({ handleMenuItemClick }) => {
   ];
 
   if (isLoading) {
-    return <div className="flex justify-center items-center h-64"><Loader2 className="w-12 h-12 animate-spin text-indigo-600" /></div>;
+    return <div className="flex h-64 items-center justify-center"><Loader2 className="h-10 w-10 animate-spin text-indigo-600" /></div>;
   }
   
   if (error) {
      return (
-      <div className="bg-red-50 border-l-4 border-red-400 p-4 w-full max-w-4xl">
+      <div className="w-full max-w-4xl border-l-4 border-red-400 bg-red-50 p-4">
         <div className="flex">
           <div className="py-1"><AlertTriangle className="h-6 w-6 text-red-500 mr-4" /></div>
           <div><p className="font-bold">Error</p><p className="text-sm">{error}</p></div>
@@ -63,13 +64,15 @@ const DashboardView = ({ handleMenuItemClick }) => {
   }
 
   return (
-    <div className="w-full max-w-6xl">
-      <h1 className="text-3xl font-extrabold text-gray-800 mb-2">Dashboard</h1>
-      <p className="text-lg text-gray-600 mb-8">Your content performance at a glance.</p>
+    <div className="w-full max-w-7xl">
+      <div className="mb-6">
+        <h1 className="text-2xl font-extrabold text-gray-800 sm:text-3xl">Dashboard</h1>
+        <p className="mt-1 text-sm text-gray-600 sm:text-base">Your content performance at a glance.</p>
+      </div>
 
-      <section className="mb-10">
-        <h2 className="text-2xl font-semibold text-gray-700 mb-4">Content Status Summary</h2>
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 sm:gap-6">
+      <section className="mb-8">
+        <h2 className="mb-3 text-xl font-semibold text-gray-700 sm:text-2xl">Content Status Summary</h2>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6 xl:gap-4">
           {contentStats.map((stat) => (
             <StatCard
               key={stat.title}
@@ -82,18 +85,20 @@ const DashboardView = ({ handleMenuItemClick }) => {
           ))}
         </div>
       </section>
-
       <section>
-        <h2 className="text-2xl font-semibold text-gray-700 mb-4">SEO Performance Overview (Last 30 Days)</h2>
-        <div className="bg-white p-6 rounded-lg shadow-md border border-gray-200">
-           <h3 className="text-xl font-semibold text-gray-800 mb-4 flex items-center">
-             <BarChart2 className="w-6 h-6 mr-2 text-indigo-500"/>
+        <h2 className="mb-3 text-xl font-semibold text-gray-700 sm:text-2xl">SEO Performance Overview (Last 30 Days)</h2>
+        <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm sm:p-5">
+           <h3 className="mb-3 flex items-center text-base font-semibold text-gray-800 sm:text-lg">
+             <BarChart2 className="mr-2 h-5 w-5 text-indigo-500"/>
              Organic Clicks & Impressions
            </h3>
-          <div className="w-full h-[350px]">
+          <div className="h-[260px] w-full sm:h-[320px]">
             <EnhancedLineChart data={chartData} />
           </div>
         </div>
+      </section>
+      <section className="mb-10">
+         <PriceIntegrityWidget /> 
       </section>
     </div>
   );

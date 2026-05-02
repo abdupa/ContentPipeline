@@ -13,8 +13,11 @@ const EnhancedLineChart = ({ data }) => {
       d3.select("body").selectAll(".d3-tooltip").remove();
 
       const containerWidth = containerRef.current.offsetWidth;
-      const containerHeight = 350;
-      const margin = { top: 20, right: 20, bottom: 50, left: 60 };
+      const containerHeight = containerRef.current.offsetHeight || 320;
+      const isNarrow = containerWidth < 640;
+      const margin = isNarrow
+        ? { top: 28, right: 10, bottom: 38, left: 44 }
+        : { top: 28, right: 20, bottom: 46, left: 56 };
       const width = containerWidth - margin.left - margin.right;
       const height = containerHeight - margin.top - margin.bottom;
 
@@ -33,25 +36,32 @@ const EnhancedLineChart = ({ data }) => {
       const xScale = d3.scaleTime().domain(d3.extent(parsedData, d => d.date)).range([0, width]);
       const yScale = d3.scaleLinear().domain([0, d3.max(parsedData, d => d.impressions) * 1.15]).range([height, 0]);
 
-      svg.append("g").attr("transform", `translate(0,${height})`).call(d3.axisBottom(xScale).ticks(5).tickFormat(d3.timeFormat("%b %d")));
-      svg.append("g").call(d3.axisLeft(yScale));
+      svg.append("g")
+        .attr("transform", `translate(0,${height})`)
+        .call(d3.axisBottom(xScale).ticks(isNarrow ? 3 : 5).tickFormat(d3.timeFormat("%b %d")))
+        .attr("font-size", isNarrow ? "10px" : "12px");
+      svg.append("g")
+        .call(d3.axisLeft(yScale).ticks(isNarrow ? 4 : 6))
+        .attr("font-size", isNarrow ? "10px" : "12px");
 
       // Add Y-axis label
       svg.append("text")
         .attr("transform", "rotate(-90)")
-        .attr("y", 0 - margin.left + 15) // Corrected position
+        .attr("y", 0 - margin.left + 12) // Corrected position
         .attr("x", 0 - (height / 2))
         .attr("dy", "1em")
         .style("text-anchor", "middle")
+        .style("font-size", isNarrow ? "11px" : "12px")
         .style("font-weight", "bold")
         .style("fill", "#374151")
         .text("Count");
         
       // Add X-axis label
       svg.append("text")
-        .attr("y", height + margin.bottom - 10)
+        .attr("y", height + margin.bottom - 8)
         .attr("x", width / 2)
         .style("text-anchor", "middle")
+        .style("font-size", isNarrow ? "11px" : "12px")
         .style("font-weight", "bold")
         .style("fill", "#374151")
         .text("Date");
@@ -72,19 +82,20 @@ const EnhancedLineChart = ({ data }) => {
         .data(legendData)
         .enter().append("g")
         .attr("class", "legend")
-        .attr("transform", (d, i) => `translate(${i * 120}, -15)`); // Corrected position
+        .attr("transform", (d, i) => `translate(${i * (isNarrow ? 96 : 120)}, -18)`); // Corrected position
 
       legend.append("rect")
         .attr("x", 0)
-        .attr("width", 12)
-        .attr("height", 12)
+        .attr("width", 10)
+        .attr("height", 10)
         .style("fill", d => d.color);
 
       legend.append("text")
-        .attr("x", 18)
-        .attr("y", 6)
+        .attr("x", 15)
+        .attr("y", 5)
         .attr("dy", ".35em")
         .style("text-anchor", "start")
+        .style("font-size", isNarrow ? "11px" : "12px")
         .text(d => d.name);
     };
     

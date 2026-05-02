@@ -15,13 +15,13 @@ const StatCard = ({ title, value, icon: Icon, color, onClick }) => {
       type="button"
       onClick={onClick}
       disabled={!onClick}
-      className={`p-4 rounded-lg shadow-md border text-left transition duration-200 hover:shadow-lg hover:-translate-y-1 flex flex-col justify-between ${colorStyles[color]} disabled:opacity-50 disabled:cursor-not-allowed`}
+      className={`min-h-[112px] rounded-lg border p-3 text-left shadow-sm transition duration-200 hover:shadow-md hover:-translate-y-0.5 flex flex-col justify-between ${colorStyles[color]} disabled:opacity-60 disabled:cursor-not-allowed`}
     >
-      <div className="flex justify-between items-start">
-        <p className="text-base font-semibold">{title}</p>
-        {Icon && <Icon className="w-5 h-5 opacity-70" />}
+      <div className="flex justify-between items-start gap-2">
+        <p className="text-sm font-semibold leading-tight">{title}</p>
+        {Icon && <Icon className="w-4 h-4 shrink-0 opacity-70" />}
       </div>
-      <p className="text-4xl sm:text-5xl font-bold mt-2">{value ?? 'N/A'}</p>
+      <p className="mt-2 text-3xl font-bold leading-none sm:text-4xl">{value ?? 'N/A'}</p>
     </button>
   );
 };

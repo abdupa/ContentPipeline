@@ -20,30 +20,30 @@ const Sidebar = ({ onMenuItemClick, activeItem }) => {
 
   return (
     // ... rest of the component remains the same
-    <div className="hidden lg:flex w-64 shrink-0 bg-gray-800 text-white flex-col rounded-r-lg shadow-lg py-6 px-4">
-      <div className="mb-8 px-4 flex justify-center">
-        <img src={logo} alt="ContentPipeline Logo" className="h-30 w-auto object-contain"/>
+    <div className="hidden lg:flex w-56 xl:w-60 shrink-0 bg-gray-800 text-white flex-col rounded-r-lg shadow-lg py-5 px-3">
+      <div className="mb-6 px-3 flex justify-center">
+        <img src={logo} alt="ContentPipeline Logo" className="h-16 w-auto object-contain"/>
       </div>
       <nav className="flex-1">
-        <ul>
+        <ul className="space-y-1">
           {menuItems.map((item) => (
-            <li key={item.name} className="mb-2">
+            <li key={item.name}>
               <button
                 onClick={() => onMenuItemClick(item.name)}
-                className={`flex items-center w-full px-4 py-2 rounded-lg text-left text-base font-medium transition duration-200 ease-in-out
+                className={`flex items-center w-full px-3 py-2 rounded-md text-left text-sm font-medium transition duration-200 ease-in-out
                   ${activeItem === item.name
                     ? 'bg-indigo-600 text-white shadow-md'
                     : 'text-gray-200 hover:bg-gray-700 hover:text-white'
                   }`}
               >
-                <item.icon className="w-5 h-5 mr-3" />
+                <item.icon className="w-4 h-4 mr-3 shrink-0" />
                 {item.name}
               </button>
             </li>
           ))}
         </ul>
       </nav>
-      <div className="mt-auto pt-6 border-t border-gray-700 text-center text-sm text-gray-400">
+      <div className="mt-auto pt-5 border-t border-gray-700 text-center text-xs text-gray-400">
         <p>&copy; 2025 ContentGen</p>
       </div>
     </div>
