@@ -16,7 +16,7 @@ Validation levels:
 | QA-PI-001 | Backend/frontend build gate | Passed | 2026-05-02 | `compileall` and `npm run build` passed. |
 | QA-PI-002 | Shopee importer staging | Deferred | Not run | Requires running real Tools importer. |
 | QA-PI-003 | Lazada importer staging | Deferred | Not run | Requires running real Tools importer. |
-| QA-PI-004 | Review UI diagnostics | Deferred | Not run | Verify `matched_by`, source IDs, stock status, prices. |
+| QA-PI-004 | Review UI diagnostics | Failed, fix in progress | 2026-05-02 | Lazada staged review showed matched rows with `Matched By = Unmatched`; frontend fallback and backend ID map strengthening added. Needs retest. |
 | QA-PI-005 | Audit `price_before` report | Deferred | Not run | Requires syncing a safe product and checking Sync Report. |
 | QA-PI-006 | Importer failure status | Deferred | Not run | Requires bad sheet/source test. |
 | QA-PI-007 | Unlink/reset mapping | Deferred | Not run | Requires safe WooCommerce product ID. |
@@ -365,4 +365,14 @@ Branch:
 Commit:
 Evidence:
 Notes:
+```
+
+```text
+Date: 2026-05-02
+Ref: QA-PI-004
+Result: Failed
+Branch: audit-price-ingestion-refinements
+Commit: a2f9923
+Evidence: Lazada Review Price Updates screenshot for job import_lazada_cb576190 showed rows with Status = MATCHED but Matched By = Unmatched.
+Notes: Fix added to infer match source from matched Woo product for legacy/current staged rows. Backend matching hierarchy remains unchanged: source product ID, exact cleaned name, then fuzzy suggestion only.
 ```

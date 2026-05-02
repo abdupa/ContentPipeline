@@ -48,6 +48,12 @@ Lazada sheet product_id -> product_database.lazada_id -> product_database.id -> 
 
 Fallback mapping currently exists by exact cleaned product name. Fuzzy matching is used as a suggestion for review, not an automatic approval.
 
+Do not change the matching hierarchy without explicit approval:
+
+1. Source-specific marketplace product ID from the Google Sheet hyperlink.
+2. Exact cleaned product name.
+3. Fuzzy nearest match suggestion for manual review only.
+
 ## Confirmed Findings
 
 - Fixed 2026-05-02: `backend/main.py` generic `/api/import/google-sheet` now requires `source` and passes it to `import_from_google_sheet_task`.
@@ -65,6 +71,8 @@ Fallback mapping currently exists by exact cleaned product name. Fuzzy matching 
 - Manual link currently mutates `slug` in the frontend; row identity would be safer with a stable row key.
 - Out-of-stock behavior should be confirmed as a business rule.
 - Generic importer route should either infer/select source or be removed from active workflows.
+- Review header should identify the staged source, such as Shopee or Lazada, so users know which importer produced the rows.
+- Legacy/current staged rows may be missing `matched_by`; review UI needs a fallback instead of showing matched rows as `Unmatched`.
 
 ## Implementation Tracker
 
@@ -101,4 +109,5 @@ Use this section for new findings as review continues.
 ```text
 2026-05-02
 - Initial audit created for Shopee/Lazada Google Sheet to WooCommerce price ingestion flow.
+- QA-PI-004 finding: Lazada review showed `MATCHED` rows with `Matched By = Unmatched`. Added frontend inference for existing/current staged rows. Backend matching remains on the original hierarchy: top-level source ID, exact cleaned name, then fuzzy suggestion only.
 ```

@@ -19,8 +19,43 @@ const getMatchLabel = (matchedBy) => ({
   marketplace_id: 'Marketplace ID',
   exact_name: 'Exact Name',
   manual_link: 'Manual Link',
+  legacy_matched: 'Matched',
   unmatched: 'Unmatched'
 }[matchedBy] || 'Unknown');
+
+const normalizeText = (value) => String(value || '').trim().toLowerCase();
+
+const getDbMarketplaceId = (dbProduct, source) => {
+  if (!dbProduct) return null;
+  const sourceKey = source || (dbProduct.shopee_id ? 'shopee' : dbProduct.lazada_id ? 'lazada' : null);
+  if (sourceKey === 'shopee') {
+    return dbProduct.shopee_id || dbProduct.linked_sources?.shopee?.product_id || null;
+  }
+  if (sourceKey === 'lazada') {
+    return dbProduct.lazada_id || dbProduct.linked_sources?.lazada?.product_id || null;
+  }
+  return null;
+};
+
+const inferMatchedBy = (product, dbProduct) => {
+  if (product.matched_by && product.matched_by !== 'unmatched') return product.matched_by;
+  if (product.action === 'link' || product.linked_db_id) return 'manual_link';
+  if (product.status !== 'MATCHED') return product.matched_by || 'unmatched';
+
+  const sourceId = String(getMarketplaceId(product) || '');
+  const dbSourceId = String(getDbMarketplaceId(dbProduct, product.source) || '');
+  if (sourceId && dbSourceId && sourceId === dbSourceId) return 'marketplace_id';
+  if (dbProduct && normalizeText(product.parsed_name) === normalizeText(dbProduct.name)) return 'exact_name';
+
+  return 'legacy_matched';
+};
+
+const getReviewSourceLabel = (products) => {
+  const sources = [...new Set(products.map(p => getSourceLabel(p)).filter(label => label !== 'Source'))];
+  if (sources.length === 1) return sources[0];
+  if (sources.length > 1) return sources.join(' + ');
+  return 'Marketplace';
+};
 
 const getRowKey = (product, index) => {
   if (product.row_key) return product.row_key;
@@ -82,6 +117,8 @@ const MatchSourceBadge = ({ matchedBy }) => {
       ? 'bg-amber-100 text-amber-800'
       : normalized === 'manual_link'
         ? 'bg-indigo-100 text-indigo-800'
+        : normalized === 'legacy_matched'
+          ? 'bg-slate-100 text-slate-700'
         : 'bg-gray-100 text-gray-700';
 
   return (
@@ -285,6 +322,7 @@ const PriceUpdateReviewView = ({ jobId, onJobStarted, onBack }) => {
   const [isSyncing, setIsSyncing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState(null);
+  const reviewSourceLabel = getReviewSourceLabel(stagedProducts);
 
   const fetchData = async () => {
     if (!jobId) {
@@ -300,13 +338,20 @@ const PriceUpdateReviewView = ({ jobId, onJobStarted, onBack }) => {
         apiClient.get('/api/products')
       ]);
 
+      const dbById = new Map(dbResponse.data.map(item => [item.id, item]));
       const productsWithAction = stagedResponse.data.map((p, index) => {
+        const targetDbId = p.linked_db_id || p.matched_db_id || null;
+        const dbProduct = targetDbId ? dbById.get(targetDbId) : null;
         const product = {
           ...p,
           action: p.action || (p.status === 'MATCHED' ? 'approve' : 'ignore'),
           linked_db_id: p.linked_db_id || null,
         };
-        return { ...product, row_key: getRowKey(product, index) };
+        return {
+          ...product,
+          matched_by: inferMatchedBy(product, dbProduct),
+          row_key: getRowKey(product, index)
+        };
       });
       setStagedProducts(productsWithAction);
       setLocalDbCache(dbResponse.data);
@@ -433,7 +478,12 @@ const PriceUpdateReviewView = ({ jobId, onJobStarted, onBack }) => {
         <div className="flex min-w-0 items-start gap-3">
           <GitPullRequest className="mt-1 h-7 w-7 shrink-0 text-indigo-600" />
           <div className="min-w-0">
-            <h1 className="text-2xl font-extrabold text-gray-800 sm:text-3xl">Review Price Updates</h1>
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-2xl font-extrabold text-gray-800 sm:text-3xl">Review {reviewSourceLabel} Price Updates</h1>
+              <span className="rounded-full bg-indigo-100 px-2.5 py-1 text-xs font-semibold text-indigo-700">
+                {reviewSourceLabel}
+              </span>
+            </div>
             <p className="text-sm text-gray-600 sm:text-base">Approve or link changes before syncing. Found {stagedProducts.length} items.</p>
           </div>
         </div>
