@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowLeft, Loader2, PackageSearch } from 'lucide-react';
+import { ArrowLeft, Loader2, PackageSearch, WandSparkles } from 'lucide-react';
 import apiClient from '../apiClient';
 
 const formatPrice = (value) => {
@@ -102,6 +102,7 @@ const ProductCandidateBucketView = ({ onBack }) => {
                 <th className="px-4 py-3 text-left text-xs font-bold uppercase text-gray-600">Price</th>
                 <th className="px-4 py-3 text-left text-xs font-bold uppercase text-gray-600">Affiliate</th>
                 <th className="px-4 py-3 text-left text-xs font-bold uppercase text-gray-600">Nearest Match</th>
+                <th className="px-4 py-3 text-left text-xs font-bold uppercase text-gray-600">Future Scrape</th>
                 <th className="px-4 py-3 text-left text-xs font-bold uppercase text-gray-600">Updated</th>
               </tr>
             </thead>
@@ -123,6 +124,17 @@ const ProductCandidateBucketView = ({ onBack }) => {
                     <AffiliateBadge diagnostics={candidate.affiliate_diagnostics} />
                   </td>
                   <td className="px-4 py-3 align-top text-sm text-gray-600">{candidate.nearest_match || 'N/A'}</td>
+                  <td className="px-4 py-3 align-top">
+                    <button
+                      type="button"
+                      disabled
+                      title="Future module: send candidate to phone/spec scraper after review."
+                      className="inline-flex items-center rounded-md bg-gray-100 px-3 py-1.5 text-xs font-semibold text-gray-500"
+                    >
+                      <WandSparkles className="mr-1.5 h-3.5 w-3.5" />
+                      Scrape Later
+                    </button>
+                  </td>
                   <td className="px-4 py-3 align-top font-mono text-xs text-gray-500">{candidate.updated_at || candidate.created_at}</td>
                 </tr>
               ))}

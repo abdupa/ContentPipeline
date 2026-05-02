@@ -263,4 +263,5 @@ Use this section for new findings as review continues.
 - Live validation: WooCommerce meta confirmed `_shopee_affiliate_status = valid`, `_shopee_affiliate_detail = Shopee affiliate parameters are present.`, `_lazada_affiliate_status = valid`, and `_lazada_affiliate_detail = Lazada affiliate parameters are present.`
 - Phase 2A implementation: Added Product Candidate Bucket storage and UI for unmatched staged products. Bucketed rows are intentionally excluded from WooCommerce sync.
 - QA-PI-013 workflow validation: Candidate Bucket displayed `Samsung Galaxy Buds4` from Lazada with source product ID, price, valid affiliate status, nearest match, and updated timestamp.
+- Added Candidate Bucket placeholder action `Scrape Later` for the future phone/spec scraper handoff. This is intentionally disabled and has no backend behavior yet.
 ```
