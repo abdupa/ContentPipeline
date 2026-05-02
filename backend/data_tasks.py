@@ -14,7 +14,7 @@ from google_sheets import get_sheets_service, fetch_sheet_grid
 from sheet_parser import (
     clean_product_name, extract_prices_shopee, extract_hyperlink_from_cell,
     slugify, convert_to_affiliate_link, parse_ecommerce_url,
-    extract_prices_lazada, clean_product_name_lazada
+    extract_prices_lazada, clean_product_name_lazada, get_affiliate_diagnostics
 )
 from thefuzz import process as fuzz_process, fuzz
 from itertools import islice
@@ -436,6 +436,7 @@ def update_multi_source_products_task(self, job_id: str, approved_products: list
                     "sale_price": approved_prod.get('new_sale_price'),
                     "regular_price": approved_prod.get('new_regular_price'),
                     "affiliate_url": approved_prod.get('affiliate_link'),
+                    "affiliate_diagnostics": approved_prod.get('affiliate_diagnostics') or {},
                     "last_updated": datetime.now(timezone.utc).isoformat(),
                     "stock_status": approved_prod.get('stock_status', 'in_stock')
                 })
@@ -454,6 +455,11 @@ def update_multi_source_products_task(self, job_id: str, approved_products: list
                 log_terminal("    - Step B: Determining winning price...") # NEW LOG
                 winning_source_key, lowest_price = None, float('inf')
                 for source_key, data in local_prod_to_update.get('linked_sources', {}).items():
+                    if data.get('affiliate_url') and not data.get('affiliate_diagnostics'):
+                        data['affiliate_diagnostics'] = get_affiliate_diagnostics(
+                            data.get('affiliate_url'),
+                            data.get('affiliate_url')
+                        )
                     # This single, clean block ensures we only check in-stock products.
                     if data.get('stock_status') == 'in_stock':
                         price = data.get('sale_price') or data.get('regular_price')
@@ -499,8 +505,11 @@ def update_multi_source_products_task(self, job_id: str, approved_products: list
                     
                     meta_data_list = []
                     for s_key, s_data in local_prod_to_update.get('linked_sources', {}).items():
+                        affiliate_diag = s_data.get('affiliate_diagnostics') or {}
                         meta_data_list.append({"key": f"_{s_key}_price", "value": str(s_data.get('sale_price') or s_data.get('regular_price') or "")})
                         meta_data_list.append({"key": f"_{s_key}_url", "value": str(s_data.get('affiliate_url') or "")})
+                        meta_data_list.append({"key": f"_{s_key}_affiliate_status", "value": str(affiliate_diag.get('status') or "")})
+                        meta_data_list.append({"key": f"_{s_key}_affiliate_detail", "value": str(affiliate_diag.get('detail') or "")})
                         meta_data_list.append({"key": f"_{s_key}_last_updated", "value": str(s_data.get('last_updated') or "")})
                         meta_data_list.append({"key": f"_{s_key}_price_history", "value": json.dumps(s_data.get('price_history', []))})
 
@@ -519,6 +528,7 @@ def update_multi_source_products_task(self, job_id: str, approved_products: list
                         "status": "Price Updated" if price_changed else "Synced",
                         "price_before": price_before,
                         "price_after": price_after,
+                        "affiliate_diagnostics": winning_source_data.get('affiliate_diagnostics') or {},
                         "details": f"Winner: {winning_source_key.capitalize()}. All source data refreshed."
                     }
                     audit_log_entries.append(audit_entry)
@@ -746,6 +756,7 @@ def import_from_google_sheet_task(self, job_id: str, sheet_url: str, source: str
                     slug = slugify(cleaned_name)
                     new_sale_price, new_regular_price = extract_prices_shopee(raw_text)
                     affiliate_link = convert_to_affiliate_link(url, slug)
+                    affiliate_diagnostics = get_affiliate_diagnostics(url, affiliate_link)
                     ids = parse_ecommerce_url(url)
                     sheet_prod_id, sheet_shop_id, source_type = ids.get('product_id'), ids.get('shop_id'), ids.get('source')
                     button_text = f"Buy on {source_type.capitalize()}" if source_type else None
@@ -770,6 +781,7 @@ def import_from_google_sheet_task(self, job_id: str, sheet_url: str, source: str
                     
                     staged_products.append({
                         "slug": slug, "parsed_name": cleaned_name, "original_url": url, "affiliate_link": affiliate_link,
+                        "affiliate_diagnostics": affiliate_diagnostics,
                         "new_sale_price": new_sale_price, "new_regular_price": new_regular_price, "button_text": button_text,
                         "status": status, "current_price": current_price, "nearest_match": nearest_match_name,
                         "shopee_id": sheet_prod_id, "lazada_id": None, "shop_id": sheet_shop_id, "source": source,
@@ -791,6 +803,7 @@ def import_from_google_sheet_task(self, job_id: str, sheet_url: str, source: str
                         new_sale_price, new_regular_price = extract_prices_lazada(price_lines)
                         slug = slugify(cleaned_name)
                         affiliate_link = convert_to_affiliate_link(url, slug)
+                        affiliate_diagnostics = get_affiliate_diagnostics(url, affiliate_link)
                         ids = parse_ecommerce_url(url)
                         sheet_prod_id, sheet_shop_id, source_type = ids.get('product_id'), ids.get('shop_id'), ids.get('source')
                         match, status, matched_by = None, "UNMATCHED", "unmatched"
@@ -814,6 +827,7 @@ def import_from_google_sheet_task(self, job_id: str, sheet_url: str, source: str
                         
                         staged_products.append({
                             "slug": slug, "parsed_name": cleaned_name, "original_url": url, "affiliate_link": affiliate_link,
+                            "affiliate_diagnostics": affiliate_diagnostics,
                             "new_sale_price": new_sale_price, "new_regular_price": new_regular_price, "button_text": "Buy on Lazada",
                             "status": status, "current_price": current_price, "nearest_match": nearest_match_name,
                             "shopee_id": None, "lazada_id": sheet_prod_id, "shop_id": sheet_shop_id, "source": source,

@@ -22,6 +22,9 @@ Validation levels:
 | QA-PI-006 | Importer failure status | Deferred | Not run | Requires bad sheet/source test. |
 | QA-PI-007 | Unlink/reset mapping | Deferred | Not run | Requires safe WooCommerce product ID. |
 | QA-PI-008 | WooCommerce live sync inspection | Deferred | Not run | Requires live sync and `data_tasks.py WOO_PRODUCT_ID`. |
+| QA-PI-010 | Affiliate URL diagnostics | Live Sync Validated | 2026-05-02 | Review/sync UI and WooCommerce meta confirmed valid Shopee/Lazada affiliate diagnostics. |
+| QA-PI-011 | Manual link live Woo fallback | Code Validated | 2026-05-02 | Local cache miss can search live WooCommerce. Needs UI retest with `Samsung Galaxy S26 Ultra`. |
+| QA-PI-012 | Stored source affiliate diagnostics backfill | Live Sync Validated | 2026-05-02 | Existing Shopee winning source showed `Valid` in Sync Report and WooCommerce meta. |
 
 ## Shared Setup
 
@@ -224,6 +227,116 @@ Price before:
 Price after:
 Report status:
 Price change display:
+Notes:
+```
+
+## QA-PI-010: Affiliate URL Diagnostics
+
+Purpose: prove the importer surfaces whether Shopee/Lazada affiliate URL generation produced a tracked affiliate URL or a fallback URL.
+
+Steps:
+
+1. Run the Shopee importer and open `Review Staged Updates`.
+2. Confirm staged rows show an `Affiliate` badge.
+3. Run the Lazada importer and open `Review Staged Updates`.
+4. Confirm staged rows show an `Affiliate` badge.
+5. Approve one safe matched row and sync to WooCommerce.
+6. Open `Sync Audit Report`.
+7. Inspect the WooCommerce product meta using `docker-compose exec backend python data_tasks.py <WOO_PRODUCT_ID>`.
+
+Pass criteria:
+
+- Review rows show one of:
+  - `Valid`
+  - `Fallback URL`
+  - `Missing Config`
+  - `Parse Failed`
+  - `Missing Link`
+- Shopee rows with generated tracking params show `Valid`.
+- Lazada rows show `Valid` when `LAZADA_AFFILIATE_PID` is configured.
+- Lazada rows show `Missing Config` when `LAZADA_AFFILIATE_PID` is absent.
+- Sync Report shows the winning source affiliate status and detail.
+- WooCommerce meta includes source-specific diagnostic keys such as:
+  - `_shopee_affiliate_status`
+  - `_shopee_affiliate_detail`
+  - `_lazada_affiliate_status`
+  - `_lazada_affiliate_detail`
+
+Evidence to record:
+
+```text
+Date:
+Branch:
+Commit:
+Source tested:
+Job ID:
+Woo product ID:
+Review affiliate badge:
+Sync report affiliate badge:
+Woo meta affiliate status:
+Notes:
+```
+
+## QA-PI-011: Manual Link Live Woo Fallback
+
+Purpose: prove manual link can find a live WooCommerce product even when `product_database.json` is stale.
+
+Steps:
+
+1. Open a staged import containing an unmatched row.
+2. In the manual-link search field, search a known live Woo product that is missing from local cache, such as `Samsung Galaxy S26 Ultra`.
+3. Wait for live search results.
+4. Select the live Woo result.
+
+Pass criteria:
+
+- Search result appears even if local `product_database.json` does not contain the product.
+- Result label shows `Live Woo`.
+- Selecting the result sets the row to manual link.
+- Linked row shows the WooCommerce product ID.
+- Sync payload uses the selected WooCommerce ID.
+
+Evidence to record:
+
+```text
+Date:
+Branch:
+Commit:
+Staged job ID:
+Search term:
+Live Woo product ID:
+Manual link result:
+Notes:
+```
+
+## QA-PI-012: Stored Source Affiliate Diagnostics Backfill
+
+Purpose: prove older linked sources show affiliate status in Sync Report even when their diagnostics were not created during staging.
+
+Steps:
+
+1. Run a Lazada importer for products that already have older Shopee linked source data.
+2. Approve safe matched rows.
+3. Sync to WooCommerce.
+4. Open Sync Audit Report.
+5. Find a row where `Details` says `Winner: Shopee`.
+
+Pass criteria:
+
+- Winning old Shopee rows do not show `Affiliate URL = Not Checked`.
+- Rows show `Valid`, `Fallback URL`, `Missing Link`, or `Parse Failed` based on the stored Shopee URL.
+- Existing affiliate URL is not regenerated or changed just to calculate diagnostics.
+
+Evidence to record:
+
+```text
+Date:
+Branch:
+Commit:
+Job ID:
+Woo product ID:
+Winning source:
+Affiliate badge:
 Notes:
 ```
 
@@ -432,4 +545,64 @@ Branch: audit-price-ingestion-refinements
 Commit: pending
 Evidence: Docker parser sample check returned `vivo Y05`, `vivo Y21d`, `vivo Y04s`, `vivo V70`, `vivo X300 series 5G`, `vivo V70 FE`, `vivo Y11d`, `vivo Watch 3`, `vivo Color Earphone`, `vivo Buds Air3`, and `vivo 44W Original Fast Charger`.
 Notes: Needs real Lazada importer retest before marking Workflow Validated.
+```
+
+```text
+Date: 2026-05-02
+Ref: QA-PI-010
+Result: Code Validated
+Branch: audit-price-ingestion-refinements
+Commit: pending
+Evidence: `PYTHONPYCACHEPREFIX=/tmp/contentpipeline-pycache python3 -m compileall -q backend` passed; `npm run build` in `frontend` passed; backend container smoke test returned `Valid` for sample Shopee and Lazada affiliate URLs.
+Notes: Needs real Shopee/Lazada importer retest, sync report check, and WooCommerce meta inspection before marking Workflow Validated or Live Sync Validated.
+```
+
+```text
+Date: 2026-05-02
+Ref: QA-PI-010
+Result: Failed / Fix Applied
+Branch: audit-price-ingestion-refinements
+Commit: pending
+Evidence: Real Lazada staged review showed `Affiliate = Not Checked` on all rows after worker restart.
+Notes: Root cause was backend `StagedProduct` response/payload model filtering out `affiliate_diagnostics`; field added for retest.
+```
+
+```text
+Date: 2026-05-02
+Ref: QA-PI-011
+Result: Code Validated
+Branch: audit-price-ingestion-refinements
+Commit: pending
+Evidence: Added `/api/products/search-live` and manual-link live Woo fallback.
+Notes: Needs UI retest by searching `Samsung Galaxy S26 Ultra` and selecting Woo product ID `45720`.
+```
+
+```text
+Date: 2026-05-02
+Ref: QA-PI-012
+Result: Code Validated
+Branch: audit-price-ingestion-refinements
+Commit: pending
+Evidence: Added sync-time diagnostics derivation from stored source `affiliate_url` when `affiliate_diagnostics` is absent.
+Notes: Needs real sync retest where `Winner: Shopee` appears during a Lazada import sync.
+```
+
+```text
+Date: 2026-05-02
+Ref: QA-PI-010
+Result: Live Sync Validated
+Branch: audit-price-ingestion-refinements
+Commit: pending
+Evidence: Sync Audit Report showed Lazada `Affiliate URL = Valid`; WooCommerce meta contained `_shopee_affiliate_status = valid`, `_shopee_affiliate_detail = Shopee affiliate parameters are present.`, `_lazada_affiliate_status = valid`, and `_lazada_affiliate_detail = Lazada affiliate parameters are present.`
+Notes: Confirms staged diagnostics, sync report display, and WooCommerce meta persistence.
+```
+
+```text
+Date: 2026-05-02
+Ref: QA-PI-012
+Result: Live Sync Validated
+Branch: audit-price-ingestion-refinements
+Commit: pending
+Evidence: Sync Audit Report showed old stored Shopee winners as `Affiliate URL = Valid` with detail `Shopee affiliate parameters are present.`
+Notes: Confirms stored source URL diagnostics backfill works when a non-refreshed source wins.
 ```

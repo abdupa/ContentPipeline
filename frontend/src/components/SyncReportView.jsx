@@ -46,6 +46,35 @@ const PriceChange = ({ before, after }) => {
   );
 };
 
+const getAffiliateDiagnostics = (item) => (
+  item.affiliate_diagnostics || {
+    status: 'unknown',
+    label: 'Not Checked',
+    detail: 'Affiliate diagnostics were not recorded for this sync entry.'
+  }
+);
+
+const AffiliateStatusBadge = ({ diagnostics }) => {
+  const status = diagnostics?.status || 'unknown';
+  const label = diagnostics?.label || 'Not Checked';
+  const color = status === 'valid'
+    ? 'bg-emerald-100 text-emerald-800'
+    : status === 'missing_config' || status === 'fallback'
+      ? 'bg-amber-100 text-amber-800'
+      : status === 'parse_failed' || status === 'missing_link'
+        ? 'bg-red-100 text-red-800'
+        : 'bg-gray-100 text-gray-700';
+
+  return (
+    <span
+      title={diagnostics?.detail || label}
+      className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${color}`}
+    >
+      {label}
+    </span>
+  );
+};
+
 const SyncReportView = ({ jobId, onBack }) => {
   const [report, setReport] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -128,6 +157,10 @@ const SyncReportView = ({ jobId, onBack }) => {
       <div className="space-y-3 md:hidden">
         {report.map((item, index) => (
           <article key={index} className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+            {(() => {
+              const affiliateDiagnostics = getAffiliateDiagnostics(item);
+              return (
+                <>
             <div className="mb-3 flex items-start justify-between gap-3">
               <span className="text-xs font-bold text-gray-500">#{index + 1}</span>
               <span className="flex items-center rounded-full bg-gray-50 px-2 py-1 text-xs font-semibold text-gray-700">
@@ -141,7 +174,15 @@ const SyncReportView = ({ jobId, onBack }) => {
               <p className="mb-1 text-[11px] font-bold uppercase text-gray-500">Price Change</p>
               <PriceChange before={item.price_before} after={item.price_after} />
             </div>
+            <div className="mt-3 rounded-md bg-gray-50 p-3">
+              <p className="mb-1 text-[11px] font-bold uppercase text-gray-500">Affiliate URL</p>
+              <AffiliateStatusBadge diagnostics={affiliateDiagnostics} />
+              <p className="mt-1 break-words text-xs text-gray-500">{affiliateDiagnostics.detail}</p>
+            </div>
             <p className="mt-3 whitespace-pre-wrap break-words text-sm text-gray-600">{item.details}</p>
+                </>
+              );
+            })()}
           </article>
         ))}
       </div>
@@ -154,29 +195,37 @@ const SyncReportView = ({ jobId, onBack }) => {
               <th className="p-4 text-left text-xs font-bold text-gray-600 uppercase">Product Name</th>
               <th className="p-4 text-left text-xs font-bold text-gray-600 uppercase">Status</th>
               <th className="p-4 text-left text-xs font-bold text-gray-600 uppercase">Price Change</th>
+              <th className="p-4 text-left text-xs font-bold text-gray-600 uppercase">Affiliate URL</th>
               <th className="p-4 text-left text-xs font-bold text-gray-600 uppercase">Details</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
-            {report.map((item, index) => (
-              <tr key={index}>
-                <td className="p-4 text-sm text-gray-500 font-mono">{index + 1}</td>
-                <td className="p-4 text-sm text-gray-800 font-medium">
-                  {item.name}
-                  <p className="text-xs text-gray-500 font-mono">WC ID: {item.wc_id}</p>
-                </td>
-                <td className="p-4 text-sm text-gray-700">
-                  <span className="flex items-center">
-                    {getStatusIcon(item.status)}
-                    <span className="ml-2">{item.status}</span>
-                  </span>
-                </td>
-                <td className="p-4 text-sm text-gray-700">
-                  <PriceChange before={item.price_before} after={item.price_after} />
-                </td>
-                <td className="p-4 text-sm text-gray-600 break-words">{item.details}</td>
-              </tr>
-            ))}
+            {report.map((item, index) => {
+              const affiliateDiagnostics = getAffiliateDiagnostics(item);
+              return (
+                <tr key={index}>
+                  <td className="p-4 text-sm text-gray-500 font-mono">{index + 1}</td>
+                  <td className="p-4 text-sm text-gray-800 font-medium">
+                    {item.name}
+                    <p className="text-xs text-gray-500 font-mono">WC ID: {item.wc_id}</p>
+                  </td>
+                  <td className="p-4 text-sm text-gray-700">
+                    <span className="flex items-center">
+                      {getStatusIcon(item.status)}
+                      <span className="ml-2">{item.status}</span>
+                    </span>
+                  </td>
+                  <td className="p-4 text-sm text-gray-700">
+                    <PriceChange before={item.price_before} after={item.price_after} />
+                  </td>
+                  <td className="p-4 text-sm text-gray-700">
+                    <AffiliateStatusBadge diagnostics={affiliateDiagnostics} />
+                    <p className="mt-1 max-w-[220px] break-words text-xs text-gray-500">{affiliateDiagnostics.detail}</p>
+                  </td>
+                  <td className="p-4 text-sm text-gray-600 break-words">{item.details}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

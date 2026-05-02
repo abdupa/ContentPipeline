@@ -23,6 +23,17 @@ const getMatchLabel = (matchedBy) => ({
   unmatched: 'Unmatched'
 }[matchedBy] || 'Unknown');
 
+const getAffiliateDiagnostics = (product) => (
+  product.affiliate_diagnostics || {
+    status: product.affiliate_link ? 'unknown' : 'missing_link',
+    label: product.affiliate_link ? 'Not Checked' : 'Missing Link',
+    is_affiliate: false,
+    detail: product.affiliate_link
+      ? 'Affiliate diagnostics were not generated for this staged row.'
+      : 'Affiliate URL is missing.'
+  }
+);
+
 const normalizeText = (value) => String(value || '').trim().toLowerCase();
 
 const getDbMarketplaceId = (dbProduct, source) => {
@@ -128,6 +139,27 @@ const MatchSourceBadge = ({ matchedBy }) => {
   );
 };
 
+const AffiliateStatusBadge = ({ diagnostics }) => {
+  const status = diagnostics?.status || 'unknown';
+  const label = diagnostics?.label || 'Not Checked';
+  const color = status === 'valid'
+    ? 'bg-emerald-100 text-emerald-800'
+    : status === 'missing_config' || status === 'fallback'
+      ? 'bg-amber-100 text-amber-800'
+      : status === 'parse_failed' || status === 'missing_link'
+        ? 'bg-red-100 text-red-800'
+        : 'bg-gray-100 text-gray-700';
+
+  return (
+    <span
+      title={diagnostics?.detail || label}
+      className={`inline-flex rounded-full px-2 py-1 text-[11px] font-medium ${color}`}
+    >
+      {label}
+    </span>
+  );
+};
+
 const DetailLine = ({ label, value, mono = false }) => (
   <div className="min-w-0">
     <dt className="text-[11px] font-semibold uppercase text-gray-500">{label}</dt>
@@ -140,12 +172,55 @@ const DetailLine = ({ label, value, mono = false }) => (
 const UnmatchedActionCell = ({ product, dbCache, onLinkProduct, onSetAction }) => {
   const [searchQuery, setSearchQuery] = useState(product.nearest_match || product.parsed_name);
   const [isActive, setIsActive] = useState(false);
+  const [liveResults, setLiveResults] = useState([]);
+  const [isLiveSearching, setIsLiveSearching] = useState(false);
+  const [liveSearchError, setLiveSearchError] = useState(null);
 
-  const searchResults = (isActive && searchQuery.length > 2)
+  const localResults = (isActive && searchQuery.length > 2)
     ? dbCache.filter(item =>
         item.name.toLowerCase().includes(searchQuery.toLowerCase())
       ).slice(0, 10)
     : [];
+
+  useEffect(() => {
+    if (!isActive || searchQuery.trim().length < 3 || localResults.length >= 5) {
+      setLiveResults([]);
+      setLiveSearchError(null);
+      return;
+    }
+
+    let isCancelled = false;
+    const timer = setTimeout(async () => {
+      setIsLiveSearching(true);
+      setLiveSearchError(null);
+      try {
+        const response = await apiClient.get('/api/products/search-live', {
+          params: { q: searchQuery.trim(), limit: 10 }
+        });
+        if (!isCancelled) setLiveResults(response.data || []);
+      } catch (error) {
+        if (!isCancelled) {
+          setLiveResults([]);
+          setLiveSearchError('Live Woo search failed.');
+        }
+      } finally {
+        if (!isCancelled) setIsLiveSearching(false);
+      }
+    }, 350);
+
+    return () => {
+      isCancelled = true;
+      clearTimeout(timer);
+    };
+  }, [isActive, searchQuery, localResults.length]);
+
+  const localIds = new Set(localResults.map(item => item.id));
+  const searchResults = [
+    ...localResults.map(item => ({ ...item, result_source: 'Local DB' })),
+    ...liveResults
+      .filter(item => !localIds.has(item.id))
+      .map(item => ({ ...item, result_source: 'Live Woo' }))
+  ].slice(0, 10);
 
   const handleSelectResult = (dbProduct) => {
     onLinkProduct(product.row_key, dbProduct);
@@ -177,10 +252,15 @@ const UnmatchedActionCell = ({ product, dbCache, onLinkProduct, onSetAction }) =
                   className="cursor-pointer p-2 text-sm hover:bg-indigo-500 hover:text-white"
                 >
                   <span className="block break-words">{result.name}</span>
-                  <span className="text-xs opacity-70">ID: {result.id}</span>
+                  <span className="text-xs opacity-70">ID: {result.id} · {result.result_source}</span>
                 </li>
               ))}
             </ul>
+          </div>
+        )}
+        {isActive && searchQuery.length > 2 && searchResults.length === 0 && (isLiveSearching || liveSearchError) && (
+          <div className="absolute z-30 mt-1 w-full rounded-md border border-gray-300 bg-white p-2 text-xs text-gray-500 shadow-lg">
+            {isLiveSearching ? 'Searching live WooCommerce...' : liveSearchError}
           </div>
         )}
       </div>
@@ -236,6 +316,7 @@ const ProductActions = ({ product, dbCache, onSetAction, onLinkProduct, onUnlink
 
 const PriceReviewCard = ({ product, index, dbCache, onSetAction, onLinkProduct, onUnlink, onInputChange }) => {
   const marketplaceId = getMarketplaceId(product);
+  const affiliateDiagnostics = getAffiliateDiagnostics(product);
 
   return (
     <article className={`rounded-lg border p-4 shadow-sm ${product.status === 'MATCHED' ? 'border-gray-200 bg-white' : 'border-blue-200 bg-blue-50'}`}>
@@ -245,6 +326,7 @@ const PriceReviewCard = ({ product, index, dbCache, onSetAction, onLinkProduct, 
           <StatusBadge status={product.status} action={product.action} />
           <MatchSourceBadge matchedBy={product.matched_by} />
           <StockStatusBadge status={product.stock_status} />
+          <AffiliateStatusBadge diagnostics={affiliateDiagnostics} />
         </div>
         <span className="shrink-0 rounded bg-gray-100 px-2 py-1 text-xs font-semibold text-gray-700">
           {getSourceLabel(product)}
@@ -275,6 +357,7 @@ const PriceReviewCard = ({ product, index, dbCache, onSetAction, onLinkProduct, 
         <DetailLine label="Match Source" value={getMatchLabel(product.matched_by)} />
         <DetailLine label={getSourceIdLabel(product)} value={marketplaceId} mono />
         <DetailLine label="Shop ID" value={product.shop_id} mono />
+        <DetailLine label="Affiliate Status" value={affiliateDiagnostics.detail || affiliateDiagnostics.label} />
         <DetailLine label="Current DB Price" value={product.current_price} />
         <DetailLine label="Nearest Match" value={product.nearest_match} />
       </dl>
@@ -526,7 +609,7 @@ const PriceUpdateReviewView = ({ jobId, onJobStarted, onBack }) => {
       </div>
 
       <div className="hidden overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-md lg:block">
-        <table className="min-w-[1180px] divide-y divide-gray-200">
+        <table className="min-w-[1320px] divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
               <th className="w-12 px-3 py-3 text-left text-xs font-bold uppercase text-gray-600">#</th>
@@ -535,6 +618,7 @@ const PriceUpdateReviewView = ({ jobId, onJobStarted, onBack }) => {
               <th className="w-[120px] px-3 py-3 text-left text-xs font-bold uppercase text-gray-600">Status</th>
               <th className="w-[135px] px-3 py-3 text-left text-xs font-bold uppercase text-gray-600">Matched By</th>
               <th className="w-[110px] px-3 py-3 text-left text-xs font-bold uppercase text-gray-600">Stock</th>
+              <th className="w-[145px] px-3 py-3 text-left text-xs font-bold uppercase text-gray-600">Affiliate</th>
               <th className="w-[190px] px-3 py-3 text-left text-xs font-bold uppercase text-gray-600">Product ID</th>
               <th className="w-[130px] px-3 py-3 text-left text-xs font-bold uppercase text-gray-600">Shop ID</th>
               <th className="w-[120px] px-3 py-3 text-right text-xs font-bold uppercase text-gray-600">Current</th>
@@ -545,6 +629,7 @@ const PriceUpdateReviewView = ({ jobId, onJobStarted, onBack }) => {
           <tbody className="divide-y divide-gray-200">
             {stagedProducts.map((product, index) => {
               const marketplaceId = getMarketplaceId(product);
+              const affiliateDiagnostics = getAffiliateDiagnostics(product);
               return (
                 <tr key={product.row_key} className={product.status === 'MATCHED' ? 'bg-white' : 'bg-blue-50'}>
                   <td className="border-r border-gray-100 px-3 py-3 text-sm font-bold text-gray-500">{index + 1}</td>
@@ -576,6 +661,7 @@ const PriceUpdateReviewView = ({ jobId, onJobStarted, onBack }) => {
                   <td className="px-3 py-3 align-top"><StatusBadge status={product.status} action={product.action} /></td>
                   <td className="px-3 py-3 align-top"><MatchSourceBadge matchedBy={product.matched_by} /></td>
                   <td className="px-3 py-3 align-top"><StockStatusBadge status={product.stock_status} /></td>
+                  <td className="px-3 py-3 align-top"><AffiliateStatusBadge diagnostics={affiliateDiagnostics} /></td>
                   <td className="px-3 py-3 align-top font-mono text-xs text-gray-600 break-all" title={marketplaceId || 'N/A'}>
                     <span className="mb-1 block text-[10px] font-sans font-semibold uppercase text-gray-400">{getSourceIdLabel(product)}</span>
                     {formatValue(marketplaceId)}

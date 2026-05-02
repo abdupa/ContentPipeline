@@ -326,44 +326,99 @@ def convert_to_affiliate_link(url: str, product_slug: str) -> str:
         # If it's not a known source, return the clean base URL
         return base_url
 
-# def convert_to_affiliate_link(
-#     url: str,
-#     product_slug: str = "",
-#     campaign_id: str = "id_HURtY6Geqq",  # <-- replace with your real Shopee campaign ID
-#     source_id: str = "an_13327880016",   # <-- your affiliate source ID
-#     term: str | None = None
-#     ) -> str | None:
-#     """
-#     Convert a Shopee product URL into a clean affiliate link.
-#     - Strips any old tracking/query params.
-#     - Inserts a fresh uls_trackid and fixed utm_campaign each time.
-#     - Passes through non-Shopee URLs unchanged.
-#     """
-#     if not url:
-#         return None
+def get_affiliate_diagnostics(url: str, affiliate_link: str) -> dict:
+    """
+    Returns review-friendly diagnostics for generated affiliate links.
+    This does not block sync; it makes config/parser fallbacks visible.
+    """
+    if not url:
+        return {
+            "status": "parse_failed",
+            "label": "Parse Failed",
+            "is_affiliate": False,
+            "detail": "Missing source URL."
+        }
 
-#     if 'shopee.ph' not in str(url):
-#         return url
+    ids = parse_ecommerce_url(url)
+    source = ids.get("source")
+    product_id = ids.get("product_id")
 
-#     # 1. Strip existing query parameters
-#     base_url = url.split('?')[0]
+    if not source:
+        return {
+            "status": "unsupported_source",
+            "label": "Unsupported",
+            "is_affiliate": False,
+            "detail": "URL is not a supported Shopee or Lazada product URL."
+        }
 
-#     # 2. Generate Shopee-style tracking ID
-#     tracking_token = generate_uls_trackid()
+    if not product_id:
+        return {
+            "status": "parse_failed",
+            "label": "Parse Failed",
+            "is_affiliate": False,
+            "detail": f"Could not extract {source.capitalize()} product ID from the source URL."
+        }
 
-#     # 3. Build affiliate parameters
-#     params = (
-#         f"?uls_trackid={tracking_token}"
-#         f"&utm_campaign={campaign_id}"
-#         f"&utm_content=----"
-#         f"&utm_medium=affiliates"
-#         f"&utm_source={source_id}"
-#     )
-#     if term:
-#         params += f"&utm_term={term}"
+    if not affiliate_link:
+        return {
+            "status": "missing_link",
+            "label": "Missing Link",
+            "is_affiliate": False,
+            "detail": "Affiliate URL was not generated."
+        }
 
-#     # 4. Return final link
-#     return base_url + params
+    parsed_affiliate = urlparse(affiliate_link)
+    params = parse_qs(parsed_affiliate.query)
+
+    if source == "shopee":
+        required = ["uls_trackid", "utm_campaign", "utm_content", "utm_medium", "utm_source"]
+        missing = [key for key in required if not params.get(key)]
+        if missing:
+            return {
+                "status": "fallback",
+                "label": "Fallback URL",
+                "is_affiliate": False,
+                "detail": f"Shopee affiliate URL is missing parameters: {', '.join(missing)}."
+            }
+        return {
+            "status": "valid",
+            "label": "Valid",
+            "is_affiliate": True,
+            "detail": "Shopee affiliate parameters are present."
+        }
+
+    if source == "lazada":
+        lazada_pid = os.getenv("LAZADA_AFFILIATE_PID")
+        if not lazada_pid:
+            return {
+                "status": "missing_config",
+                "label": "Missing Config",
+                "is_affiliate": False,
+                "detail": "LAZADA_AFFILIATE_PID is not configured; clean Lazada URL was used."
+            }
+
+        laz_trackid = params.get("laz_trackid", [""])[0]
+        mkttid = params.get("mkttid", [""])[0]
+        if not laz_trackid or not mkttid or lazada_pid not in laz_trackid:
+            return {
+                "status": "fallback",
+                "label": "Fallback URL",
+                "is_affiliate": False,
+                "detail": "Lazada affiliate URL is missing laz_trackid, mkttid, or configured PID."
+            }
+        return {
+            "status": "valid",
+            "label": "Valid",
+            "is_affiliate": True,
+            "detail": "Lazada affiliate parameters are present."
+        }
+
+    return {
+        "status": "unsupported_source",
+        "label": "Unsupported",
+        "is_affiliate": False,
+        "detail": "URL source is unsupported."
+    }
 
 def parse_ecommerce_url(url):
     """

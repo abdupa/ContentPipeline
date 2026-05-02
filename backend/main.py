@@ -8,7 +8,7 @@ import traceback
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 from datetime import datetime, timezone, date, timedelta
-from fastapi import FastAPI, UploadFile, File, HTTPException, Response, status
+from fastapi import FastAPI, UploadFile, File, HTTPException, Response, status, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, FileResponse, JSONResponse
 from shared_state import redis_client, log_terminal, log_action
@@ -177,6 +177,7 @@ class StagedProduct(BaseModel):
     parsed_name: str
     original_url: str
     affiliate_link: str
+    affiliate_diagnostics: Optional[Dict[str, Any]] = None
     new_sale_price: Optional[float] = None
     new_regular_price: Optional[float] = None
     button_text: Optional[str] = None
@@ -1419,6 +1420,70 @@ async def get_all_products():
     except Exception as e:
         log_terminal(f"❌ ERROR reading product_database.json: {e}")
         raise HTTPException(status_code=500, detail="Failed to read product database.")
+
+@app.get("/api/products/search-live")
+async def search_live_products(q: str = Query(..., min_length=3), limit: int = Query(10, ge=1, le=20)):
+    """
+    Searches WooCommerce directly when the local product database cache is stale.
+    Used as a manual-link fallback in the price review UI.
+    """
+    log_terminal(f"--- HIT: GET /api/products/search-live q={q!r} ---")
+    wc_url = os.getenv("WC_URL")
+    wc_key = os.getenv("WC_KEY")
+    wc_secret = os.getenv("WC_SECRET")
+    if not all([wc_url, wc_key, wc_secret]):
+        raise HTTPException(status_code=500, detail="WooCommerce API credentials are not configured.")
+
+    fields = "id,name,slug,permalink,price,regular_price,sale_price,external_url,button_text,meta_data"
+    params = {
+        "search": q,
+        "per_page": limit,
+        "status": "publish",
+        "_fields": fields
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(
+                f"{wc_url}/wp-json/wc/v3/products",
+                params=params,
+                auth=(wc_key, wc_secret)
+            )
+
+        if response.status_code in [401, 403]:
+            raise HTTPException(status_code=403, detail="WooCommerce authentication failed. Check API keys.")
+        if response.status_code != 200:
+            raise HTTPException(status_code=502, detail=f"WooCommerce Error: {response.text}")
+
+        products = response.json()
+        normalized_products = []
+        for product in products:
+            meta_map = {item.get("key"): item.get("value") for item in product.get("meta_data", [])}
+            normalized_products.append({
+                "id": product.get("id"),
+                "name": product.get("name"),
+                "slug": product.get("slug"),
+                "permalink": product.get("permalink"),
+                "price": product.get("price") or "N/A",
+                "sale_price": product.get("sale_price"),
+                "regular_price": product.get("regular_price"),
+                "external_url": product.get("external_url"),
+                "button_text": product.get("button_text"),
+                "shopee_id": meta_map.get("_shopee_id"),
+                "lazada_id": meta_map.get("_lazada_id"),
+                "linked_sources": {
+                    "shopee": {"product_id": meta_map.get("_shopee_id")},
+                    "lazada": {"product_id": meta_map.get("_lazada_id")}
+                }
+            })
+        return normalized_products
+    except HTTPException:
+        raise
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=503, detail=f"Connection error to WooCommerce: {str(e)}")
+    except Exception as e:
+        log_terminal(f"❌ ERROR searching live WooCommerce products: {e}")
+        raise HTTPException(status_code=500, detail="Failed to search WooCommerce products.")
 
 @app.post("/api/import/google-sheet", response_model=JobCreationResponse)
 async def import_from_google_sheet(payload: dict):
