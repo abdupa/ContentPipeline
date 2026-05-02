@@ -2,6 +2,59 @@
 
 Use this SOP before changing code, especially in flows that touch Google Sheets parsing, WooCommerce updates, or user-facing review screens.
 
+## 0. Interaction Mode Guardrails
+
+Treat the user's wording as the workflow mode.
+
+### No-Edit Discussion Mode
+
+When the user asks to review, assess, analyze, audit, discuss, give a take, identify gaps, or propose options:
+
+- Inspect files, logs, screenshots, and current behavior only.
+- Do not edit code or docs.
+- Present findings, risks, and recommendations first.
+- Include expected result/output/behavior for every proposed change.
+- Wait for explicit approval before implementation.
+
+Approval words include `proceed`, `approved`, `implement`, `fix it`, `make the change`, or similarly clear instruction.
+
+### Live Flow Guardrail
+
+For live or working flows involving Google Sheets import, parser normalization, WooCommerce sync, price logic, Redis job state, audit reports, or external APIs:
+
+- Default to audit-first.
+- Do not alter parser/sync behavior during discussion mode.
+- Do not change matching hierarchy without explicit approval.
+- Create or confirm a checkpoint branch/commit before risky changes.
+- Include a validation plan and rollback/checkpoint note before implementation.
+
+### Proposal Requirement
+
+Before implementation, every proposal must include expected result/output/behavior.
+
+For UI changes:
+
+- What the user will see.
+- Changed labels, columns, cards, buttons, or states.
+- Mobile/desktop behavior when relevant.
+
+For backend/API changes:
+
+- Expected request/response or payload shape.
+- Expected job status behavior.
+- Expected stored fields, Redis keys, or audit log fields.
+
+For parser/normalization changes:
+
+- Sample input -> expected output cases.
+- Edge cases that should not change.
+
+For sync/WooCommerce changes:
+
+- Expected before/after price behavior.
+- Expected WooCommerce fields/meta_data.
+- Expected QA evidence and rollback/checkpoint.
+
 ## 1. Inspect Existing State
 
 Before editing:
@@ -43,6 +96,12 @@ Expected behavior after change:
 Risk:
 - What could break?
 - Which UI/backend paths need validation?
+
+Expected result/output/behavior:
+- What should the user see or receive?
+- What fields/values should be stored?
+- What sample inputs should produce what sample outputs?
+- What should remain unchanged?
 ```
 
 For price ingestion, explicitly identify:
