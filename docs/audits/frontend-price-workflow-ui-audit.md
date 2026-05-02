@@ -238,16 +238,16 @@ This makes all values visible and avoids horizontal table scrolling for the crit
 
 | Status | Item | Notes |
 | --- | --- | --- |
-| Pending | Fix app shell mobile layout | Sidebar and `sm-p-8` typo. |
-| Pending | Make Tools importer buttons responsive | Stack buttons on mobile; separate loading states. |
-| Pending | Make JobStatus completion banner responsive | Stack message/action on mobile. |
-| Pending | Redesign PriceReview mobile layout | Add card layout under `lg`; keep compact table for desktop. |
-| Pending | Compact PriceReview desktop table | Reduce padding, group IDs/source, improve wrapping. |
-| Pending | Add stable row key | Avoid using mutable `slug` for row state updates. |
-| Pending | Improve value visibility | `break-all`, `title`, right-aligned price inputs. |
-| Pending | Add source-aware labels | Show Shopee/Lazada ID instead of generic Sheet Product ID. |
-| Pending | Make SyncReport mobile layout | Cards for narrow screens. |
-| Pending | Browser screenshot verification | Verify mobile and desktop after implementation. |
+| Done | Fix app shell mobile layout | Fixed `sm-p-8` typo, added `min-w-0`, and added compact mobile navigation while hiding the desktop sidebar on small screens. |
+| Done | Make Tools importer buttons responsive | Buttons stack on mobile; separate Shopee/Lazada loading state. |
+| Done | Make JobStatus completion banner responsive | Completion/failure states now stack cleanly on mobile. |
+| Done | Redesign PriceReview mobile layout | Added card layout under `lg`; desktop keeps table. |
+| Done | Compact PriceReview desktop table | Reduced padding, grouped source ID label, improved wrapping. |
+| Done | Add stable row key | Frontend state updates use `row_key` instead of mutable `slug`. |
+| Done | Improve value visibility | Long IDs break, prices align right, job IDs wrap. |
+| Done | Add source-aware labels | Source ID labels now show Shopee/Lazada context. |
+| Done | Make SyncReport mobile layout | Added audit cards below `md`; desktop keeps table. |
+| Partial | Browser screenshot verification | Production build passed in Docker; screenshots still pending. |
 
 ## Verification Plan
 
@@ -273,4 +273,5 @@ Critical checks:
 ```text
 2026-05-02
 - Initial UI audit created for Tools, Job Status, Price Review, Sync Report, and app shell responsiveness.
+- Implemented first responsive pass for Tools, Job Status, Price Review, Sync Report, app shell spacing, and mobile navigation.
 ```

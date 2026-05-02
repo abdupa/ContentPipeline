@@ -1,6 +1,6 @@
 import React from 'react';
 import { LayoutDashboard, Globe, CheckSquare, Settings, BookOpen, History, Send, Edit3, BarChart2, TrendingUp, Wrench, Smartphone } from 'lucide-react';
-import logo from '../assets/cpl-logo4.png';
+import logo from '../assets/react.svg';
 
 const Sidebar = ({ onMenuItemClick, activeItem }) => {
   const menuItems = [
@@ -20,7 +20,7 @@ const Sidebar = ({ onMenuItemClick, activeItem }) => {
 
   return (
     // ... rest of the component remains the same
-    <div className="w-64 bg-gray-800 text-white flex flex-col rounded-r-lg shadow-lg py-6 px-4">
+    <div className="hidden lg:flex w-64 shrink-0 bg-gray-800 text-white flex-col rounded-r-lg shadow-lg py-6 px-4">
       <div className="mb-8 px-4 flex justify-center">
         <img src={logo} alt="ContentPipeline Logo" className="h-30 w-auto object-contain"/>
       </div>
@@ -30,7 +30,7 @@ const Sidebar = ({ onMenuItemClick, activeItem }) => {
             <li key={item.name} className="mb-2">
               <button
                 onClick={() => onMenuItemClick(item.name)}
-                className={`flex items-center w-full px-4 py-2 rounded-lg text-left text-lg font-medium transition duration-200 ease-in-out
+                className={`flex items-center w-full px-4 py-2 rounded-lg text-left text-base font-medium transition duration-200 ease-in-out
                   ${activeItem === item.name
                     ? 'bg-indigo-600 text-white shadow-md'
                     : 'text-gray-200 hover:bg-gray-700 hover:text-white'

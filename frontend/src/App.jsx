@@ -24,6 +24,20 @@ const App = () => {
   const [activeJobId, setActiveJobId] = useState(null);
   const [projectToEdit, setProjectToEdit] = useState(null);
   const [draftToEditId, setDraftToEditId] = useState(null);
+  const mobileMenuItems = [
+    'Dashboard',
+    'Insights',
+    'Performance',
+    'Scraping Projects',
+    'Manual Editor',
+    'Product Database',
+    'Content Library',
+    'Approval Queue',
+    'Published Posts',
+    'Action History',
+    'Tools',
+    'Settings',
+  ];
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -83,7 +97,19 @@ const App = () => {
         if (origin === 'tools') return 'Tools';
         return 'Scraping Projects';
     }
-    // ... (rest of the function is the same, this is a simplified version)
+    if (currentView === 'priceReview' || currentView === 'syncReport') return 'Tools';
+    if (currentView === 'dashboard') return 'Dashboard';
+    if (currentView === 'insights') return 'Insights';
+    if (currentView === 'performance') return 'Performance';
+    if (currentView === 'projects' || currentView === 'scrapeWizard') return 'Scraping Projects';
+    if (currentView === 'manualEditor') return 'Manual Editor';
+    if (currentView === 'productDatabase') return 'Product Database';
+    if (currentView === 'allPosts' || currentView === 'contentEditor') return 'Content Library';
+    if (currentView === 'approvalQueue') return 'Approval Queue';
+    if (currentView === 'publishedPosts') return 'Published Posts';
+    if (currentView === 'actionHistory') return 'Action History';
+    if (currentView === 'tools') return 'Tools';
+    if (currentView === 'settings') return 'Settings';
     return 'Dashboard'; // Fallback
   };
   
@@ -120,14 +146,23 @@ const App = () => {
   return (
     <div className="min-h-screen bg-gray-100 flex font-sans">
       <Sidebar onMenuItemClick={handleMenuItemClick} activeItem={getActiveSidebarItem()} />
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 min-w-0 flex flex-col">
         <header className="bg-white shadow-sm p-4 flex items-center justify-between border-b border-gray-200">
-          <div className="text-2xl font-extrabold text-gray-800 tracking-tight">ContentGen.ai</div>
+          <div className="text-xl sm:text-2xl font-extrabold text-gray-800 tracking-tight">ContentGen.ai</div>
           <div className="flex items-center space-x-4">
-             {/* Header buttons */}
+            <select
+              value={getActiveSidebarItem()}
+              onChange={(e) => handleMenuItemClick(e.target.value)}
+              className="lg:hidden max-w-[170px] rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm font-medium text-gray-700"
+              aria-label="Navigate"
+            >
+              {mobileMenuItems.map(item => (
+                <option key={item} value={item}>{item}</option>
+              ))}
+            </select>
           </div>
         </header>
-        <main className="flex-1 flex items-start justify-center p-4 sm-p-8 overflow-auto">{renderCurrentView()}</main>
+        <main className="flex-1 flex items-start justify-center p-3 sm:p-6 lg:p-8 overflow-auto">{renderCurrentView()}</main>
       </div>
     </div>
   );

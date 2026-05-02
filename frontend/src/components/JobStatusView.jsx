@@ -36,31 +36,31 @@ const JobStatusView = ({ jobId, onReset, onNavigateToQueue, onNavigateToReview, 
     onReset(localStorage.getItem('jobOriginView') || 'projects');
   };
 
-  if (!jobData) return <div className="flex justify-center p-8"><Loader2 className="animate-spin" /> Loading job status...</div>;
+  if (!jobData) return <div className="flex justify-center p-6 text-sm"><Loader2 className="animate-spin mr-2" /> Loading job status...</div>;
 
   return (
-    <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-5xl border border-gray-200">
-      <div className="flex justify-between items-start mb-6">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-800">{jobData.project_name || "Job Status"}</h2>
-          <p className="text-sm text-gray-500 font-mono">ID: {jobId}</p>
+    <div className="bg-white p-4 sm:p-6 lg:p-8 rounded-lg shadow-xl w-full max-w-5xl border border-gray-200">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3 mb-6">
+        <div className="min-w-0">
+          <h2 className="text-xl sm:text-2xl font-bold text-gray-800">{jobData.project_name || "Job Status"}</h2>
+          <p className="text-xs sm:text-sm text-gray-500 font-mono break-all">ID: {jobId}</p>
         </div>
-        <button onClick={handleBack} className="px-4 py-2 bg-gray-200 text-gray-800 rounded-md">Back</button>
+        <button onClick={handleBack} className="w-full sm:w-auto px-4 py-2 bg-gray-200 text-gray-800 rounded-md">Back</button>
       </div>
 
       {['processing', 'discovering', 'scraping', 'starting'].includes(jobData.status) && (
          <div className="mb-6">
           <div className="flex justify-between items-center mb-1">
-            <span className="text-lg font-semibold text-indigo-600 flex items-center"><Loader2 className="animate-spin mr-2" /> {jobData.status.charAt(0).toUpperCase() + jobData.status.slice(1)}...</span>
+            <span className="text-base sm:text-lg font-semibold text-indigo-600 flex items-center"><Loader2 className="animate-spin mr-2" /> {jobData.status.charAt(0).toUpperCase() + jobData.status.slice(1)}...</span>
           </div>
          </div>
       )}
 
       {jobData.status === 'complete' && (
-        <div className="mb-6 p-4 bg-green-50 text-green-700 rounded-lg flex items-center justify-between">
-            <div className="flex items-center">
-                <CheckCircle className="mr-3" />
-                <span className="text-lg font-semibold">
+        <div className="mb-6 p-4 bg-green-50 text-green-700 rounded-lg flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div className="flex items-start sm:items-center">
+                <CheckCircle className="mr-3 mt-0.5 sm:mt-0 shrink-0" />
+                <span className="text-base sm:text-lg font-semibold">
                   {/* This message now handles all job types */}
                   {jobId.includes('import')
                     ? "Import complete. Products are staged for review."
@@ -75,20 +75,20 @@ const JobStatusView = ({ jobId, onReset, onNavigateToQueue, onNavigateToReview, 
             
             {/* --- THIS IS THE SINGLE, CORRECT LOGIC BLOCK --- */}
             {jobId.includes('import') ? (
-                <button onClick={() => onNavigateToReview(jobId)} className="px-4 py-2 bg-purple-600 text-white font-semibold rounded-md hover:bg-purple-700 flex items-center gap-2">
+                <button onClick={() => onNavigateToReview(jobId)} className="w-full sm:w-auto px-4 py-2 bg-purple-600 text-white font-semibold rounded-md hover:bg-purple-700 flex items-center justify-center gap-2">
                     <GitPullRequest className="w-5 h-5"/> Review Staged Updates
                 </button>
             ) : jobId.includes('inspect') ? (
-                <button onClick={handleDownloadCsv} className="px-4 py-2 bg-blue-600 text-white font-semibold rounded-md hover:bg-blue-700 flex items-center gap-2">
+                <button onClick={handleDownloadCsv} className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white font-semibold rounded-md hover:bg-blue-700 flex items-center justify-center gap-2">
                     <Download className="w-5 h-5"/> Download Inspection CSV
                 </button>
             ) : jobId.includes('wcsync') ? ( // <-- Your new condition is correct
-                <button onClick={() => onNavigateToReport(jobId)} className="px-4 py-2 bg-indigo-600 text-white font-semibold rounded-md hover:bg-indigo-700 flex items-center gap-2">
+                <button onClick={() => onNavigateToReport(jobId)} className="w-full sm:w-auto px-4 py-2 bg-indigo-600 text-white font-semibold rounded-md hover:bg-indigo-700 flex items-center justify-center gap-2">
                     <FileDown className="w-5 h-5"/> View Sync Report
                 </button>
             ) : (
                 // This is the default fallback for other job types
-                <button onClick={onNavigateToQueue} className="px-4 py-2 bg-green-600 text-white font-semibold rounded-md hover:bg-green-700 flex items-center gap-2">
+                <button onClick={onNavigateToQueue} className="w-full sm:w-auto px-4 py-2 bg-green-600 text-white font-semibold rounded-md hover:bg-green-700 flex items-center justify-center gap-2">
                     <CheckSquare className="w-5 h-5"/> View Drafts in Approval Queue
                 </button>
             )}
@@ -96,9 +96,9 @@ const JobStatusView = ({ jobId, onReset, onNavigateToQueue, onNavigateToReview, 
       )}
       
       {jobData.status === 'failed' && (
-        <div className="mb-6 p-4 bg-red-50 text-red-700 rounded-lg flex items-center">
-          <XCircle className="mr-3" />
-          <span className="text-lg font-semibold">Job Failed: {jobData.error || 'An unknown error occurred.'}</span>
+        <div className="mb-6 p-4 bg-red-50 text-red-700 rounded-lg flex items-start">
+          <XCircle className="mr-3 mt-0.5 shrink-0" />
+          <span className="text-base sm:text-lg font-semibold">{jobData.error || 'An unknown error occurred.'}</span>
         </div>
       )}
     </div>
