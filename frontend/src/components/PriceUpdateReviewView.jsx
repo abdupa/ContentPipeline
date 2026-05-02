@@ -535,7 +535,7 @@ const PriceUpdateReviewView = ({ jobId, onJobStarted, onBack }) => {
               <th className="w-[120px] px-3 py-3 text-left text-xs font-bold uppercase text-gray-600">Status</th>
               <th className="w-[135px] px-3 py-3 text-left text-xs font-bold uppercase text-gray-600">Matched By</th>
               <th className="w-[110px] px-3 py-3 text-left text-xs font-bold uppercase text-gray-600">Stock</th>
-              <th className="w-[190px] px-3 py-3 text-left text-xs font-bold uppercase text-gray-600">Source ID</th>
+              <th className="w-[190px] px-3 py-3 text-left text-xs font-bold uppercase text-gray-600">Product ID</th>
               <th className="w-[130px] px-3 py-3 text-left text-xs font-bold uppercase text-gray-600">Shop ID</th>
               <th className="w-[120px] px-3 py-3 text-right text-xs font-bold uppercase text-gray-600">Current</th>
               <th className="w-[135px] px-3 py-3 text-right text-xs font-bold uppercase text-gray-600">Regular</th>

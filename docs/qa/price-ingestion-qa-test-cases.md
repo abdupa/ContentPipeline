@@ -16,7 +16,8 @@ Validation levels:
 | QA-PI-001 | Backend/frontend build gate | Passed | 2026-05-02 | `compileall` and `npm run build` passed. |
 | QA-PI-002 | Shopee importer staging | Deferred | Not run | Requires running real Tools importer. |
 | QA-PI-003 | Lazada importer staging | Deferred | Not run | Requires running real Tools importer. |
-| QA-PI-004 | Review UI diagnostics | Failed, fix in progress | 2026-05-02 | Lazada staged review showed matched rows with `Matched By = Unmatched`; frontend fallback and backend ID map strengthening added. Needs retest. |
+| QA-PI-004 | Review UI diagnostics | Failed, fix in progress | 2026-05-02 | Lazada staged review showed matched rows with `Matched By = Unmatched`; frontend display fallback added. Needs retest. |
+| QA-PI-009 | Lazada product name normalization | Code Validated | 2026-05-02 | Sample parser check normalized noisy Lazada names such as `vivo Y05 mobilephone|...` to `vivo Y05`. Needs real importer retest. |
 | QA-PI-005 | Audit `price_before` report | Deferred | Not run | Requires syncing a safe product and checking Sync Report. |
 | QA-PI-006 | Importer failure status | Deferred | Not run | Requires bad sheet/source test. |
 | QA-PI-007 | Unlink/reset mapping | Deferred | Not run | Requires safe WooCommerce product ID. |
@@ -340,6 +341,49 @@ Source meta updated:
 Notes:
 ```
 
+## QA-PI-009: Lazada Product Name Normalization
+
+Purpose: prove noisy Lazada title text is reduced to a concise product name without changing the primary product-ID matching hierarchy.
+
+Sample command:
+
+```bash
+docker-compose exec backend python - <<'PY'
+from sheet_parser import clean_product_name_lazada
+samples = [
+    "vivo Y05 mobilephone|6500 mAh BlueVolt Battery|IP65 Dust and Water Resistance",
+    "[AVAILABLE NOW] vivo Y21d cellphone丨6500 mAh BlueVolt Battery & 44W Flash Charge",
+    "vivo V70 FE Mobile phone|200MP OIS Ultra-Clear Al Imaging|7000mAh BlueVolt Battery",
+    "vivo Color Earphone",
+]
+for sample in samples:
+    print(clean_product_name_lazada(sample))
+PY
+```
+
+Pass criteria:
+
+- Phone titles keep brand and model only where practical.
+- Feature/spec text after `|` or `丨` is removed.
+- Generic words such as `mobilephone`, `mobile phone`, and `cellphone` are removed.
+- Accessory names such as `vivo Color Earphone` are not damaged.
+- Backend matching hierarchy remains unchanged:
+  1. source product ID
+  2. exact cleaned name
+  3. fuzzy suggestion only
+
+Evidence to record:
+
+```text
+Date:
+Branch:
+Commit:
+Input sample:
+Expected normalized name:
+Observed normalized name:
+Notes:
+```
+
 ## Deferred Test Log
 
 Use this when we intentionally move forward without a real pass.
@@ -375,4 +419,14 @@ Branch: audit-price-ingestion-refinements
 Commit: a2f9923
 Evidence: Lazada Review Price Updates screenshot for job import_lazada_cb576190 showed rows with Status = MATCHED but Matched By = Unmatched.
 Notes: Fix added to infer match source from matched Woo product for legacy/current staged rows. Backend matching hierarchy remains unchanged: source product ID, exact cleaned name, then fuzzy suggestion only.
+```
+
+```text
+Date: 2026-05-02
+Ref: QA-PI-009
+Result: Code Validated
+Branch: audit-price-ingestion-refinements
+Commit: pending
+Evidence: Docker parser sample check returned `vivo Y05`, `vivo Y21d`, `vivo Y04s`, `vivo V70`, `vivo X300 series 5G`, `vivo V70 FE`, `vivo Y11d`, `vivo Watch 3`, `vivo Color Earphone`, `vivo Buds Air3`, and `vivo 44W Original Fast Charger`.
+Notes: Needs real Lazada importer retest before marking Workflow Validated.
 ```

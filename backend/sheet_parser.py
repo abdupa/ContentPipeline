@@ -411,11 +411,20 @@ def clean_product_name_lazada(first_line_text: str) -> str:
     name_part = re.sub(r'\[.*?\]', '', first_line_text)
     name_part = re.sub(r'\(.*?\)', '', name_part)
     name_part = re.sub(r'【.*?】', '', name_part)
+    name_part = re.sub(r'[\u200b\xa0]', ' ', name_part)
+
+    # Lazada product titles usually put the sellable product name first, then
+    # marketing specs after a separator. Keep the first segment only.
+    name_part = re.split(r'[|丨]+', name_part, maxsplit=1)[0]
 
     # --- STAGE 2: THE "NOISE ISOLATOR" ---
     # Find the *first occurrence* of a spec or noise keyword and chop the string there.
     # This handles both cases with the '丨' separator and those without.
-    stop_pattern = re.compile(r'(丨|\d{4,5}mAh|\d+W Fast Charge|IP\d+)', re.IGNORECASE)
+    stop_pattern = re.compile(
+        r'(\d{4,5}\s*mAh|\d+\s*W\s*(?:Fast\s*)?(?:Flash\s*)?Charge|IP\d+|'
+        r'\d+\s*MP|AMOLED|BlueVolt|Battery|RAM|ROM|Refresh\s+Rate|Water\s+Resistance)',
+        re.IGNORECASE
+    )
     match = stop_pattern.search(name_part)
     if match:
         # If we find noise, chop the string off right before it starts
@@ -423,11 +432,12 @@ def clean_product_name_lazada(first_line_text: str) -> str:
 
     # --- STAGE 3: FINAL KEYWORD CLEANUP ---
     # Now, run a final cleanup on the isolated name to remove generic words.
-    generic_keywords = r'\b(cellphone|phone|smartphone)\b'
+    generic_keywords = r'\b(mobile\s*phone|mobilephone|cellphone|phone|smartphone)\b'
     name_part = re.sub(generic_keywords, '', name_part, flags=re.IGNORECASE)
+    name_part = re.sub(r'\s{2,}', ' ', name_part)
     
     # Final whitespace trim
-    return name_part.strip()
+    return name_part.strip(' -|丨')
 
 def extract_prices_lazada(price_lines: list) -> tuple:
     """
