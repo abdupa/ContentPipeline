@@ -27,6 +27,14 @@ load_dotenv()
 
 PRODUCT_DB_PATH = "product_database.json"
 
+def prices_match(price_a, price_b):
+    if price_a in (None, "") and price_b in (None, ""):
+        return True
+    try:
+        return math.isclose(float(price_a), float(price_b), rel_tol=0, abs_tol=0.01)
+    except (TypeError, ValueError):
+        return str(price_a or "") == str(price_b or "")
+
 def get_wc_api():
     wc_url = os.getenv("WC_URL")
     wc_key = os.getenv("WC_KEY")
@@ -106,7 +114,7 @@ def update_product_database_task():
         
         # --- STEP 2: LOOP AND DEEP SYNC EACH PRODUCT ---
         all_products = []
-        POLITE_DELAY_SECONDS = 0.5 
+        POLITE_DELAY_SECONDS = 1 
         MAX_SINGLE_PRODUCT_RETRIES = 3
         RETRY_DELAY_SECONDS = 5
 
@@ -178,108 +186,6 @@ def update_product_database_task():
         _create_audit_log(status="FAILED", total_found=len(all_product_ids), total_synced=0, failed_ids=all_product_ids, error_message=error_message)
         raise e
 
-
-# @celery_app.task
-# def update_product_database_task():
-#     # This is our upgraded V3 task from Phase 1
-#     """
-#     (DEEP SYNC v3 - MULTI-SOURCE SCHEMA)
-#     Builds an accurate mirror of the live WooCommerce database with the new
-#     multi-source schema, including a 'linked_sources' object.
-#     """
-#     all_product_ids = []
-#     failed_ids = []
-    
-#     try:
-#         log_terminal("--- [DEEP SYNC] Starting full product database synchronization... ---")
-#         wcapi = get_wc_api()
-#         if not wcapi:
-#             raise Exception("WooCommerce API client not available.")
-
-#         page = 1
-#         log_terminal("    - Step 1: Fetching all product IDs...")
-#         while True:
-#             try:
-#                 products_batch = wcapi.get("products", params={"per_page": 100, "page": page, "status": "publish", "_fields": "id"}).json()
-#                 if not products_batch: break
-#                 all_product_ids.extend([p['id'] for p in products_batch])
-#                 log_terminal(f"    - Found {len(all_product_ids)} IDs so far...")
-#                 page += 1
-#             except Exception as e:
-#                 log_terminal(f"    - ❌ ERROR fetching product ID list on page {page}: {e}")
-#                 break
-        
-#         log_terminal(f"    - Found a total of {len(all_product_ids)} products to sync.")
-        
-#         all_products = []
-        
-#         POLITE_DELAY_SECONDS = 0.5 
-#         MAX_SINGLE_PRODUCT_RETRIES = 3
-#         RETRY_DELAY_SECONDS = 5
-
-#         for index, product_id in enumerate(all_product_ids):
-#             log_terminal(f"    - Syncing product {index + 1}/{len(all_product_ids)} (ID: {product_id})...")
-            
-#             synced_successfully = False
-#             for attempt in range(MAX_SINGLE_PRODUCT_RETRIES):
-#                 try:
-#                     fields = "id,name,slug,permalink,price,regular_price,sale_price,sku,external_url,button_text,attributes,meta_data"
-#                     product = wcapi.get(f"products/{product_id}", params={"_fields": fields}).json()
-                    
-#                     meta_map = {item['key']: item['value'] for item in product.get('meta_data', [])}
-#                     key_specs = {
-#                         attr['name']: ", ".join(attr['options'])
-#                         for attr in product.get('attributes', []) if attr.get('options')
-#                     }
-
-#                     linked_sources = {
-#                         "shopee": { "source_product_id": meta_map.get('_shopee_id'), "name": None, "url": None, "price": None, "last_updated": None, },
-#                         "lazada": { "source_product_id": meta_map.get('_lazada_id'), "name": None, "url": None, "price": None, "last_updated": None, }
-#                     }
-
-#                     product_data = {
-#                         "id": product.get('id'), "name": product.get('name'), "sku": product.get('sku'),
-#                         "slug": product.get('slug'), "permalink": product.get('permalink'), "key_specs": key_specs,
-#                         "price": product.get('price') or "N/A", "sale_price": product.get('sale_price'),
-#                         "regular_price": product.get('regular_price'), "external_url": product.get('external_url'),
-#                         "button_text": product.get('button_text'), "shopee_id": meta_map.get('_shopee_id'),
-#                         "lazada_id": meta_map.get('_lazada_id'), "shop_id": meta_map.get('_shop_id'),
-#                         "price_history": json.loads(meta_map.get('_price_history', '[]')),
-#                         "current_sale_price": product.get('sale_price') or product.get('regular_price'),
-#                         "current_source": "woocommerce",
-#                         "linked_sources": linked_sources,
-#                     }
-                    
-#                     all_products.append(product_data)
-#                     synced_successfully = True
-#                     break
-
-#                 except requests.exceptions.RequestException as e:
-#                     log_terminal(f"    - ⚠️ WARNING: (Attempt {attempt + 1}/{MAX_SINGLE_PRODUCT_RETRIES}) Network/API error for ID {product_id}. Status: {e.response.status_code if e.response else 'N/A'}.")
-#                     if attempt < MAX_SINGLE_PRODUCT_RETRIES - 1: time.sleep(RETRY_DELAY_SECONDS)
-#                 except Exception as e:
-#                     log_terminal(f"    - ⚠️ WARNING: (Attempt {attempt + 1}) An unexpected error occurred for product ID {product_id}: {e}. This error will not be retried.")
-#                     break
-
-#             if not synced_successfully:
-#                 log_terminal(f"    - ❌ CRITICAL: Failed to sync product ID {product_id} after {MAX_SINGLE_PRODUCT_RETRIES} attempts. Skipping.")
-#                 failed_ids.append(product_id)
-
-#             time.sleep(POLITE_DELAY_SECONDS)
-
-#         with open(PRODUCT_DB_PATH, 'w', encoding='utf-8') as f:
-#             json.dump(all_products, f, indent=2, ensure_ascii=False)
-        
-#         _create_audit_log(status="SUCCESS", total_found=len(all_product_ids), total_synced=len(all_products), failed_ids=failed_ids)
-#         return f"Deep Sync complete. Synced {len(all_products)}/{len(all_product_ids)} products."
-        
-#     except Exception as e:
-#         error_message = f"A critical, unhandled error occurred: {e}"
-#         log_terminal(f"❌ [DEEP SYNC] {error_message}")
-#         _create_audit_log(status="FAILED", total_found=len(all_product_ids), total_synced=0, failed_ids=all_product_ids, error_message=error_message)
-#         raise e
-
-
 @celery_app.task(bind=True)
 def update_woocommerce_products_task(self, job_id: str, approved_products: list):
     """
@@ -295,6 +201,14 @@ def update_woocommerce_products_task(self, job_id: str, approved_products: list)
 
     def update_job_status(status, message):
         redis_client.set(job_key, json.dumps({"job_id": job_id, "status": status, "message": message}), ex=3600)
+
+    def prices_match(price_a, price_b):
+        if price_a in (None, "") and price_b in (None, ""):
+            return True
+        try:
+            return math.isclose(float(price_a), float(price_b), rel_tol=0, abs_tol=0.01)
+        except (TypeError, ValueError):
+            return str(price_a or "") == str(price_b or "")
 
     update_job_status("processing", f"Starting sync for {len(approved_products)} products...")
     
@@ -501,6 +415,7 @@ def update_multi_source_products_task(self, job_id: str, approved_products: list
             log_terminal(f"    - Lookup result for integer ID {target_db_id}: {'FOUND' if local_prod_to_update else 'NOT FOUND'}")
 
             if local_prod_to_update:
+                previous_price = local_prod_to_update.get('current_sale_price') or local_prod_to_update.get('current_regular_price') or local_prod_to_update.get('sale_price')
                 source = approved_prod.get('source')
                 if not source: 
                     log_terminal("    - ⚠️ WARNING: 'source' field not found in payload. Skipping.") # NEW LOG
@@ -594,9 +509,9 @@ def update_multi_source_products_task(self, job_id: str, approved_products: list
                     meta_data_list.append({"key": "_price_history", "value": json.dumps(winning_source_data.get('price_history', []))})
 
                     # --- V1.4 FIX: Re-introduce the audit log entry creation ---
-                    price_before = local_prod_to_update.get('current_sale_price')
+                    price_before = previous_price
                     price_after = winning_source_data.get('sale_price') or winning_source_data.get('regular_price')
-                    price_changed = price_before != price_after
+                    price_changed = not prices_match(price_before, price_after)
 
                     audit_entry = {
                         "name": local_prod_to_update.get('name'),
@@ -633,7 +548,7 @@ def update_multi_source_products_task(self, job_id: str, approved_products: list
                         "name": local_prod_to_update.get('name'),
                         "wc_id": local_prod_to_update.get('id'),
                         "status": "Phased Out",
-                        "price_before": local_prod_to_update.get('current_sale_price'),
+                        "price_before": previous_price,
                         "price_after": None,
                         "details": "All sources are out of stock. Product link updated to category page."
                     }
@@ -766,7 +681,6 @@ if __name__ == "__main__":
     product_id_arg = sys.argv[1]
     run_inspector(product_id_arg)
 
-
 @celery_app.task(bind=True)
 def import_from_google_sheet_task(self, job_id: str, sheet_url: str, source: str):
     """
@@ -835,15 +749,19 @@ def import_from_google_sheet_task(self, job_id: str, sheet_url: str, source: str
                     ids = parse_ecommerce_url(url)
                     sheet_prod_id, sheet_shop_id, source_type = ids.get('product_id'), ids.get('shop_id'), ids.get('source')
                     button_text = f"Buy on {source_type.capitalize()}" if source_type else None
-                    match, status, tier_1_match_success = None, "UNMATCHED", False
+                    match, status, matched_by = None, "UNMATCHED", "unmatched"
                     if sheet_prod_id and source_type == 'shopee':
                         match = shopee_id_map.get(sheet_prod_id)
-                    if match: tier_1_match_success = True
-                    if not match: match = name_map.get(cleaned_name.lower())
+                    if match:
+                        matched_by = "marketplace_id"
+                    if not match:
+                        match = name_map.get(cleaned_name.lower())
+                        if match:
+                            matched_by = "exact_name"
                     current_price, nearest_match_name = "N/A", None
                     if match:
                         status, current_price = "MATCHED", match.get('sale_price') or match.get('price', "N/A")
-                        if tier_1_match_success: cleaned_name = match.get('name', cleaned_name)
+                        if matched_by == "marketplace_id": cleaned_name = match.get('name', cleaned_name)
                         slug = match.get('slug', slug)
                     else:
                         if all_product_names:
@@ -856,6 +774,7 @@ def import_from_google_sheet_task(self, job_id: str, sheet_url: str, source: str
                         "status": status, "current_price": current_price, "nearest_match": nearest_match_name,
                         "shopee_id": sheet_prod_id, "lazada_id": None, "shop_id": sheet_shop_id, "source": source,
                         "matched_db_id": match.get('id') if match else None, "matched_db_slug": match.get('slug') if match else slug,
+                        "matched_by": matched_by,
                         "stock_status": stock_status, # <-- TARGETED CHANGE
                     })
 
@@ -874,10 +793,15 @@ def import_from_google_sheet_task(self, job_id: str, sheet_url: str, source: str
                         affiliate_link = convert_to_affiliate_link(url, slug)
                         ids = parse_ecommerce_url(url)
                         sheet_prod_id, sheet_shop_id, source_type = ids.get('product_id'), ids.get('shop_id'), ids.get('source')
-                        match, status = None, "UNMATCHED"
+                        match, status, matched_by = None, "UNMATCHED", "unmatched"
                         if sheet_prod_id and source_type == 'lazada':
                             match = lazada_id_map.get(sheet_prod_id)
-                        if not match: match = name_map.get(cleaned_name.lower())
+                        if match:
+                            matched_by = "marketplace_id"
+                        if not match:
+                            match = name_map.get(cleaned_name.lower())
+                            if match:
+                                matched_by = "exact_name"
                         current_price, nearest_match_name = "N/A", None
                         if match:
                             status, current_price = "MATCHED", match.get('sale_price') or match.get('price', "N/A")
@@ -894,6 +818,7 @@ def import_from_google_sheet_task(self, job_id: str, sheet_url: str, source: str
                             "status": status, "current_price": current_price, "nearest_match": nearest_match_name,
                             "shopee_id": None, "lazada_id": sheet_prod_id, "shop_id": sheet_shop_id, "source": source,
                             "matched_db_id": match.get('id') if match else None, "matched_db_slug": match.get('slug') if match else slug,
+                            "matched_by": matched_by,
                             "stock_status": stock_status, # <-- TARGETED CHANGE
                         })
 
@@ -904,387 +829,17 @@ def import_from_google_sheet_task(self, job_id: str, sheet_url: str, source: str
 
     except Exception as e:
         log_terminal(f"❌ [IMPORTER] FAILED for job {job_id}. Error: {e}")
+        redis_client.set(
+            job_key,
+            json.dumps({
+                "job_id": job_id,
+                "status": "failed",
+                "message": "Google Sheet import failed.",
+                "error": str(e)
+            }),
+            ex=3600
+        )
         raise e
-
-# @celery_app.task(bind=True)
-# def import_from_google_sheet_task(self, job_id: str, sheet_url: str, source: str):
-#     """
-#     (FINAL, SOURCE-AWARE VERSION)
-#     Connects to a Google Sheet and intelligently calls the correct parser
-#     (Shopee or Lazada) based on the `source` parameter.
-#     """
-#     job_key = f"job:{job_id}"
-#     result_key = f"staging_area:{job_id}"
-#     log_terminal(f"--- [IMPORTER] Starting job {job_id} for source: {source.upper()} ---")
-    
-#     try:
-#         # --- 1. Load Fresh DB ---
-#         product_database = []
-#         try:
-#             with open(PRODUCT_DB_PATH, 'r', encoding='utf-8') as f:
-#                 product_database = json.load(f)
-#         except Exception: pass
-        
-#         # --- 2. Build Lookup Maps ---
-#         shopee_id_map, lazada_id_map, name_map, all_product_names = {}, {}, {}, []
-#         for prod in product_database:
-#             if prod.get('shopee_id'): shopee_id_map[str(prod['shopee_id'])] = prod
-#             if prod.get('lazada_id'): lazada_id_map[str(prod['lazada_id'])] = prod
-#             if prod.get('name'):
-#                 name_map[prod['name'].lower()] = prod
-#                 all_product_names.append(prod['name'])
-        
-#         # --- 3. Fetch Grid Data from Google Sheets API ---
-#         match = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", sheet_url)
-#         spreadsheet_id = match.group(1)
-#         gid_match = re.search(r"[#&]gid=([0-9]+)", sheet_url)
-#         sheet_gid = gid_match.group(1)
-        
-#         service = get_sheets_service()
-#         sheet_metadata = service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
-#         sheet = next((s for s in sheet_metadata['sheets'] if s['properties']['sheetId'] == int(sheet_gid)), None)
-#         grid_data = fetch_sheet_grid(spreadsheet_id, sheet['properties']['title'])
-
-#         staged_products = []
-        
-#         # --- 4. SOURCE-AWARE PROCESSING ROUTER ---
-        
-#         if source == 'shopee':
-#             # --- SHOPEE LOGIC (Row-by-Row) ---
-#             for row in grid_data:
-#                 vals = row.get("values", [])
-#                 if not vals or not vals[0].get("formattedValue"): continue
-#                 raw_text, url = extract_hyperlink_from_cell(vals[0])
-#                 if not url: continue
-                
-#                 # --- This block is your complete, working Shopee logic ---
-#                 cleaned_name = clean_product_name(raw_text) # First, clean the name
-#                 slug = slugify(cleaned_name)                # THEN, create the slug from the result
-#                 new_sale_price, new_regular_price = extract_prices_shopee(raw_text)
-#                 affiliate_link = convert_to_affiliate_link(url, slug)
-#                 ids = parse_ecommerce_url(url)
-#                 sheet_prod_id, sheet_shop_id, source_type = ids.get('product_id'), ids.get('shop_id'), ids.get('source')
-#                 button_text = f"Buy on {source_type.capitalize()}" if source_type else None
-
-#                 match, status, tier_1_match_success = None, "UNMATCHED", False
-#                 if sheet_prod_id and source_type == 'shopee':
-#                     match = shopee_id_map.get(sheet_prod_id)
-#                 if match: tier_1_match_success = True
-#                 if not match: match = name_map.get(cleaned_name.lower())
-                
-#                 current_price, nearest_match_name = "N/A", None
-#                 if match:
-#                     status, current_price = "MATCHED", match.get('sale_price') or match.get('price', "N/A")
-#                     if tier_1_match_success: cleaned_name = match.get('name', cleaned_name)
-#                     slug = match.get('slug', slug)
-#                 else:
-#                     if all_product_names:
-#                         best_match = fuzz_process.extractOne(cleaned_name, all_product_names, scorer=fuzz.token_set_ratio)
-#                         if best_match: nearest_match_name = best_match[0]
-                
-#                 staged_products.append({
-#                     "slug": slug, "parsed_name": cleaned_name, "original_url": url, "affiliate_link": affiliate_link,
-#                     "new_sale_price": new_sale_price, "new_regular_price": new_regular_price, "button_text": button_text,
-#                     "status": status, "current_price": current_price, "nearest_match": nearest_match_name,
-#                     "shopee_id": sheet_prod_id, "lazada_id": None, "shop_id": sheet_shop_id, "source": source,
-#                     "matched_db_id": match.get('id') if match else None, "matched_db_slug": match.get('slug') if match else slug
-#                 })
-
-#         elif source == 'lazada':
-#             # --- LAZADA LOGIC (Block-by-Block) ---
-#             # from sheet_parser import clean_product_name_lazada, extract_prices_lazada
-            
-#             row_iterator = iter(grid_data)
-#             for row in row_iterator:
-#                 vals = row.get("values", [])
-#                 if not vals or not vals[0].get("formattedValue"): continue
-                
-#                 if vals[0].get("hyperlink"):
-#                     first_line_text, url = extract_hyperlink_from_cell(vals[0])
-#                     if not url: continue
-                    
-#                     price_lines = [v.get("formattedValue", "") for r in islice(row_iterator, 3) for v in r.get("values", [])]
-                    
-#                     cleaned_name = clean_product_name_lazada(first_line_text)
-#                     new_sale_price, new_regular_price = extract_prices_lazada(price_lines)
-                    
-#                     slug = slugify(cleaned_name)
-#                     affiliate_link = convert_to_affiliate_link(url, slug)
-#                     ids = parse_ecommerce_url(url)
-#                     sheet_prod_id, sheet_shop_id, source_type = ids.get('product_id'), ids.get('shop_id'), ids.get('source')
-                    
-#                     match, status = None, "UNMATCHED"
-#                     if sheet_prod_id and source_type == 'lazada':
-#                         match = lazada_id_map.get(sheet_prod_id)
-#                     if not match: match = name_map.get(cleaned_name.lower())
-                    
-#                     current_price, nearest_match_name = "N/A", None
-#                     if match:
-#                         status, current_price = "MATCHED", match.get('sale_price') or match.get('price', "N/A")
-#                         cleaned_name = match.get('name', cleaned_name)
-#                         slug = match.get('slug', slug)
-#                     else:
-#                         if all_product_names:
-#                             best_match = fuzz_process.extractOne(cleaned_name, all_product_names, scorer=fuzz.token_set_ratio)
-#                             if best_match: nearest_match_name = best_match[0]
-                            
-#                     staged_products.append({
-#                         "slug": slug, "parsed_name": cleaned_name, "original_url": url, "affiliate_link": affiliate_link,
-#                         "new_sale_price": new_sale_price, "new_regular_price": new_regular_price, "button_text": "Buy on Lazada",
-#                         "status": status, "current_price": current_price, "nearest_match": nearest_match_name,
-#                         "shopee_id": None, "lazada_id": sheet_prod_id, "shop_id": sheet_shop_id, "source": source,
-#                         "matched_db_id": match.get('id') if match else None, "matched_db_slug": match.get('slug') if match else slug
-#                     })
-
-#         # --- 5. Save to Redis ---
-#         redis_client.set(result_key, json.dumps(staged_products), ex=3600)
-#         final_status = {"job_id": job_id, "status": "complete", "result_key": result_key, "message": f"Staged {len(staged_products)} products."}
-#         redis_client.set(job_key, json.dumps(final_status), ex=3600)
-
-#     except Exception as e:
-#         log_terminal(f"❌ [IMPORTER] FAILED for job {job_id}. Error: {e}")
-#         raise e
-
-# @celery_app.task(bind=True)
-# def update_woocommerce_products_task(self, job_id: str, approved_products: list):
-#     """
-#     (ROBUST VERSION)
-#     Receives approved products, splits them into chunks, and syncs each chunk
-#     to WooCommerce with retries, delays, and error handling. Updates the local DB once.
-#     """
-#     job_key = f"job:{job_id}"
-#     log_terminal(f"--- [ROBUST SYNC - P3] Starting job {job_id} for {len(approved_products)} products. ---")
-    
-#     # --- Tunable Constants ---
-#     CHUNK_SIZE = 25            # Number of products per API batch call (WC limit is 100)
-#     MAX_API_RETRIES = 3        # How many times to retry a single failed chunk
-#     RETRY_DELAY_SECONDS = 5    # How long to wait between failed attempts
-#     POLITE_DELAY_SECONDS = 1   # How long to wait between SUCCESSFUL chunks
-
-#     # --- Job Status Helper ---
-#     def update_job_status(status, message):
-#         redis_client.set(job_key, json.dumps({
-#             "job_id": job_id, "status": status, "message": message
-#         }), ex=3600)
-
-#     update_job_status("processing", f"Starting sync for {len(approved_products)} products...")
-    
-#     wcapi = get_wc_api()
-#     if not wcapi:
-#         update_job_status("failed", "WooCommerce API not configured.")
-#         return
-
-#     try:
-#         # 1. Load local DB (This logic is the same as before)
-#         with open(PRODUCT_DB_PATH, 'r', encoding='utf-8') as f:
-#             local_products = json.load(f)
-#         # product_map_by_slug = {prod['slug']: prod for prod in local_products if 'slug' in prod}
-#         product_map_by_id = {prod['id']: prod for prod in local_products if 'id' in prod}
-        
-#         wc_full_batch_payload = []  # We still build the FULL list of payloads first
-#         today_str = datetime.now().strftime("%Y-%m-%d")
-#         updated_local_count = 0
-
-#         # 2. Build the Payloads (This logic is the same as before)
-#         for approved_prod in approved_products:
-            
-#             action = approved_prod.get('action')
-#             target_db_id = None # This will store the final, clean integer ID
-
-#             # --- NEW, TYPE-SAFE ROUTING LOGIC ---
-#             raw_id_to_find = None
-#             if action == 'approve':
-#                 # This was a pre-matched item. Get its ID from the Phase 1 data.
-#                 raw_id_to_find = approved_prod.get('matched_db_id')
-            
-#             elif action == 'link':
-#                 # This is a manually linked item. Get its ID from the Phase 2 UI data.
-#                 raw_id_to_find = approved_prod.get('linked_db_id')
-            
-#             # Safely convert the found ID (which could be a str or int) to a clean integer
-#             if raw_id_to_find is not None:
-#                 try:
-#                     target_db_id = int(raw_id_to_find)
-#                 except (ValueError, TypeError):
-#                     log_terminal(f"    - ⚠️ WARNING: Could not convert ID '{raw_id_to_find}' to integer for product '{approved_prod.get('parsed_name')}'. Skipping.")
-#             # --- END OF FIX ---
-
-#             # If we have a valid target ID, find the product in our ID map
-#             local_prod_to_update = product_map_by_id.get(target_db_id) if target_db_id else None
-
-#             # If we successfully found the product in our DB, proceed with the update
-#             if local_prod_to_update:
-#                 wc_id = local_prod_to_update.get('id') 
-
-#                 # --- 1. GET DATA FROM THE APPROVED PAYLOAD ---
-#                 source = approved_prod.get('source') # 'shopee' or 'lazada'
-#                 if not source:
-#                     continue # Skip if the source is unknown
-
-#                 # --- 2. UPDATE SOURCE-SPECIFIC DATA IN LOCAL DB OBJECT ---
-                
-#                 # Ensure the main 'linked_sources' dictionary exists
-#                 if 'linked_sources' not in local_prod_to_update:
-#                     local_prod_to_update['linked_sources'] = {}
-                
-#                 # Get the existing data for this specific source (e.g., Shopee's data)
-#                 source_data = local_prod_to_update['linked_sources'].get(source, {})
-
-#                 # "Preserve Link" Logic: Use existing link if it's there, otherwise use the new one.
-#                 existing_aff_link = source_data.get('affiliate_url')
-#                 generated_aff_link = approved_prod.get('affiliate_link')
-#                 final_affiliate_link = existing_aff_link if existing_aff_link else generated_aff_link
-
-#                 # Update the source-specific data
-#                 source_data['product_id'] = approved_prod.get(f'{source}_id')
-#                 source_data['shop_id'] = approved_prod.get('shop_id')
-#                 source_data['sale_price'] = approved_prod.get('new_sale_price')
-#                 source_data['regular_price'] = approved_prod.get('new_regular_price')
-#                 source_data['affiliate_url'] = final_affiliate_link
-#                 source_data['last_updated'] = datetime.now(timezone.utc).isoformat()
-                
-#                 # Append to the source-specific price history
-#                 current_source_price = source_data.get('sale_price') or source_data.get('regular_price')
-#                 history = source_data.get('price_history', [])
-#                 if not history or (history and history[-1].get('price') != current_source_price):
-#                     history.append({"date": today_str, "price": current_source_price})
-#                 source_data['price_history'] = history
-                
-#                 # Save the fully updated source data back to the main DB object
-#                 local_prod_to_update['linked_sources'][source] = source_data
-
-#                 # --- 3. DETERMINE WINNING PRICE (Lowest Price Logic) ---
-#                 winning_source_key = None
-#                 lowest_price = float('inf')
-                
-#                 for source_key, data in local_prod_to_update.get('linked_sources', {}).items():
-#                     price = data.get('sale_price') or data.get('regular_price')
-#                     if price is not None and price < lowest_price:
-#                         lowest_price = price
-#                         winning_source_key = source_key
-                
-#                 # --- 4. UPDATE TOP-LEVEL DB FIELDS WITH WINNER'S DATA ---
-#                 if winning_source_key:
-#                     winning_source_data = local_prod_to_update['linked_sources'][winning_source_key]
-                    
-#                     # Apply price logic for the winner
-#                     win_sale = winning_source_data.get('sale_price')
-#                     win_reg = winning_source_data.get('regular_price')
-
-#                     # Update top-level fields in our local DB object
-#                     local_prod_to_update['current_sale_price'] = win_sale
-#                     local_prod_to_update['current_regular_price'] = win_reg
-#                     local_prod_to_update['current_source'] = winning_source_key
-#                     local_prod_to_update['current_affiliate_url'] = winning_source_data.get('affiliate_url')
-#                     local_prod_to_update['button_text'] = f"Buy on {winning_source_key.capitalize()}"
-
-#                     # --- 5. BUILD FINAL WC API PAYLOAD (using winner's data) ---
-#                     final_sale_price_str = str(win_sale) if win_sale else ""
-#                     final_reg_price_str = str(win_reg) if win_reg else ""
-#                     final_main_price_str = final_sale_price_str or final_reg_price_str
-
-#                     meta_data_list = [
-#                         {"key": "_shopee_id", "value": str(local_prod_to_update['linked_sources'].get('shopee', {}).get('product_id') or "")},
-#                         {"key": "_lazada_id", "value": str(local_prod_to_update['linked_sources'].get('lazada', {}).get('product_id') or "")},
-#                         {"key": "_price_history", "value": json.dumps(winning_source_data.get('price_history', []))}
-#                     ]
-                    
-#                     product_api_data = {
-#                         "id": wc_id,
-#                         "type": "external",
-#                         "name": local_prod_to_update.get('name'),
-#                         "price": final_main_price_str,
-#                         "regular_price": final_reg_price_str,
-#                         "sale_price": final_sale_price_str,
-#                         "external_url": winning_source_data.get('affiliate_url'),
-#                         "button_text": f"Buy on {winning_source_key.capitalize()}",
-#                         "meta_data": meta_data_list
-#                     }
-                    
-#                     wc_full_batch_payload.append(product_api_data)
-#                     updated_local_count += 1
-                
-#         # --- 3. NEW: CHUNKING, RETRY, AND DELAY LOGIC ---
-#         if not wc_full_batch_payload:
-#             log_terminal("    - No matched products found to update. Task complete.")
-#             update_job_status("complete", "Sync complete. No matched products required an update.")
-#             return "Sync complete. No matched products required an update."
-
-#         # Split our full payload list into a list of smaller chunks
-#         chunks = [wc_full_batch_payload[i:i + CHUNK_SIZE] for i in range(0, len(wc_full_batch_payload), CHUNK_SIZE)]
-#         total_chunks = len(chunks)
-#         failed_chunks_count = 0
-        
-#         log_terminal(f"    - Starting batch sync of {len(wc_full_batch_payload)} products in {total_chunks} chunk(s) of {CHUNK_SIZE}...")
-
-#         for i, chunk in enumerate(chunks):
-#             chunk_num = i + 1
-#             log_terminal(f"    - Processing chunk {chunk_num}/{total_chunks}...")
-#             update_job_status("processing", f"Syncing chunk {chunk_num}/{total_chunks}...")
-            
-#             sent_successfully = False
-#             for attempt in range(MAX_API_RETRIES):
-#                 try:
-#                     batch_data = {"update": chunk}
-#                     response = wcapi.post("products/batch", batch_data)
-#                     response_json = response.json() # Get the JSON response regardless of status
-
-#                     if response.status_code >= 400:
-#                         # This is a WooCommerce API error (e.g., bad data, invalid SKU, etc.)
-#                         log_terminal(f"    - ❌ API ERROR: Chunk {chunk_num} (Attempt {attempt + 1}) failed with Status {response.status_code}.")
-#                         log_terminal(f"    - WC Response: {json.dumps(response_json)}") # LOG THE FULL ERROR
-#                         # We raise an exception to trigger the retry
-#                         raise requests.exceptions.HTTPError(f"Batch update failed: {response_json.get('message', 'Unknown API Error')}", response=response)
-                    
-#                     # If we get here, the status code was 2xx (Success)
-#                     sent_successfully = True
-#                     log_terminal(f"    - ✅ Chunk {chunk_num}/{total_chunks} synced successfully.")
-#                     break  # Success! Exit the retry loop.
-
-#                 except requests.exceptions.RequestException as e:
-#                     # This catches network errors, timeouts, 503s, etc.
-#                     log_terminal(f"    - ⚠️ NETWORK ERROR: Chunk {chunk_num} (Attempt {attempt + 1}/{MAX_API_RETRIES}) failed: {e}")
-#                     if attempt < MAX_API_RETRIES - 1:
-#                         time.sleep(RETRY_DELAY_SECONDS) # Wait before retrying
-#                     else:
-#                         log_terminal(f"    - ❌ CRITICAL: Chunk {chunk_num} FAILED permanently after {MAX_API_RETRIES} attempts.")
-#                         failed_chunks_count += 1
-                
-#                 except Exception as e:
-#                     # Catches other unexpected errors (like the response not being JSON)
-#                     log_terminal(f"    - ❌ UNEXPECTED ERROR on Chunk {chunk_num} (Attempt {attempt + 1}): {e}")
-#                     if attempt < MAX_API_RETRIES - 1:
-#                         time.sleep(RETRY_DELAY_SECONDS)
-#                     else:
-#                         log_terminal(f"    - ❌ CRITICAL: Chunk {chunk_num} FAILED permanently. Error type: {type(e)}")
-#                         failed_chunks_count += 1
-
-#             if sent_successfully and total_chunks > 1:
-#                 time.sleep(POLITE_DELAY_SECONDS) # Be nice to the API between successful calls
-
-#         # --- 4. Final Local DB Save (Only ONCE) ---
-#         log_terminal(f"    - All chunks processed. Saving {updated_local_count} updates to local product_database.json...")
-#         with open(PRODUCT_DB_PATH, 'w', encoding='utf-8') as f:
-#             json.dump(local_products, f, indent=2, ensure_ascii=False)
-#         log_terminal("    - ✅ Local product_database.json saved.")
-
-#         # --- 5. Final Report ---
-#         if failed_chunks_count > 0:
-#             final_message = f"Sync complete with errors. {failed_chunks_count} out of {total_chunks} chunks failed."
-#             log_terminal(f"❌ [PHASE 3 SYNC] {final_message}")
-#             update_job_status("failed", final_message) # Mark job as failed if any chunk failed
-#             raise Exception(final_message)
-#         else:
-#             final_message = f"Successfully synced all {len(wc_full_batch_payload)} products in {total_chunks} chunks."
-#             log_terminal(f"✅ [PHASE 3 SYNC] Job {job_id} complete. {final_message}")
-#             update_job_status("complete", final_message)
-#             return final_message
-
-#     except Exception as e:
-#         error_message = f"❌ [PHASE 3 SYNC] A critical, unhandled error occurred: {e}"
-#         log_terminal(error_message)
-#         update_job_status("failed", str(e))
-#         raise e  # Re-raise to make Celery mark the task as FAILED
 
 @celery_app.task(bind=True)
 def inspect_wc_product_task(self, job_id: str, product_id: int):
@@ -1348,12 +903,317 @@ def run_inspector(product_id: str):
     except Exception as e:
          log_terminal(f"--- [COMMAND TOOL] FAILED with an unexpected error: {e} ---")
 
+# def run_bulk_add_news_tab(brand_name: str, tag_slug: str, limit: int = 0):
+#     """
+#     Finds products matching 'brand_name', appends a custom YIKES News tab,
+#     and generates a JSON audit log of changes.
+#     Args:
+#         limit (int): If > 0, stops after processing this many products (for testing).
+#     """
+#     log_terminal(f"--- [BULK TAB TOOL] Starting News Tab Update for Brand: {brand_name} ---")
+    
+#     if limit > 0:
+#         log_terminal(f"⚠️  TEST MODE ACTIVE: Limiting execution to first {limit} products.")
+
+#     wcapi = get_wc_api()
+#     if not wcapi:
+#         return
+
+#     # 1. Load Local DB
+#     try:
+#         with open(PRODUCT_DB_PATH, 'r', encoding='utf-8') as f:
+#             local_products = json.load(f)
+#     except:
+#         log_terminal("❌ Error: Could not load local database.")
+#         return
+
+#     # Filter products
+#     target_products = [p for p in local_products if brand_name.lower() in p['name'].lower()]
+#     log_terminal(f"    - Found {len(target_products)} total matches for '{brand_name}'.")
+
+#     # --- APPLY LIMIT ---
+#     if limit > 0:
+#         target_products = target_products[:limit]
+#         log_terminal(f"    - processing subset of {len(target_products)} products...")
+
+#     if not target_products:
+#         return
+
+#     updated_count = 0
+#     audit_log = [] # List to store our log entries
+    
+#     # 2. Loop through targets
+#     for index, prod in enumerate(target_products):
+#         wc_id = prod['id']
+#         name = prod['name']
+#         permalink = prod.get('permalink') or prod.get('url') # Get URL for log
+        
+#         try:
+#             # A. Fetch LIVE data
+#             live_product = wcapi.get(f"products/{wc_id}").json()
+#             meta_data = live_product.get('meta_data', [])
+
+#             # B. Find existing YIKES tabs
+#             yikes_tabs = []
+#             for meta in meta_data:
+#                 if meta['key'] == 'yikes_woo_products_tabs':
+#                     yikes_tabs = meta['value']
+#                     break
+            
+#             # C. Check duplicates
+#             tab_exists = any(tag_slug in str(tab.get('content', '')) for tab in yikes_tabs)
+#             if tab_exists:
+#                 print(f"    - ⏭️  Skipping {name} (ID: {wc_id}) - Tab already exists.")
+#                 continue
+
+#             # D. Create New Tab
+#             new_tab = {
+#                 "title": f"📢 {brand_name} News and Updates",
+#                 "id": f"{brand_name.lower()}-news-updates",
+#                 "content": f'<p>[recent_posts_by_tax tag="{tag_slug}" show="6" columns="3" image="1" show_tags="0" show_cats="0"]</p>'
+#             }
+
+#             # E. Append & Send
+#             yikes_tabs.append(new_tab)
+#             payload = { "meta_data": [{ "key": "yikes_woo_products_tabs", "value": yikes_tabs }] }
+            
+#             wcapi.put(f"products/{wc_id}", payload).raise_for_status()
+#             print(f"    - ✅ Updated {name} (ID: {wc_id})")
+            
+#             # --- F. Add to Audit Log ---
+#             audit_log.append({
+#                 "id": wc_id,
+#                 "name": name,
+#                 "url": permalink,
+#                 "updated_at": datetime.now().isoformat()
+#             })
+            
+#             updated_count += 1
+#             time.sleep(0.5)
+
+#         except Exception as e:
+#             print(f"    - ❌ Failed to update {name}: {e}")
+
+#     # 3. Save Audit Log to JSON File
+#     if audit_log:
+#         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+#         filename = f"audit_log_{brand_name}_{timestamp}.json"
+#         try:
+#             with open(filename, 'w', encoding='utf-8') as f:
+#                 json.dump(audit_log, f, indent=2)
+#             log_terminal(f"📄 Audit log saved to: {filename}")
+#         except Exception as e:
+#             log_terminal(f"⚠️ Failed to save audit log file: {e}")
+
+#     log_terminal(f"--- [BULK TAB TOOL] Complete. Updated {updated_count} products. ---")
+
+def run_bulk_add_news_tab(brand_name: str, tag_slug: str, limit: int = 0):
+    """
+    Finds products matching 'brand_name', appends a custom YIKES News tab
+    with a specific SEO-optimized intro link, and generates a JSON audit log.
+    """
+    log_terminal(f"--- [BULK TAB TOOL] Starting News Tab Update for Brand: {brand_name} ---")
+    
+    # --- CONFIG: Dedicated News Page Mapping ---
+    # Add your dedicated brand pages here. Keys must be lowercase.
+    BRAND_NEWS_MAP = {
+        "samsung": "https://gadgetph.com/smartphones/samsung/samsung-upcoming-releases-philippines-2025/", #docker-compose exec backend python data_tasks.py add_news "samsung" "samsung-news-updates" 1
+        "xiaomi": "https://gadgetph.com/smartphones/xiaomi/xiaomi-upcoming-phones/", # docker-compose exec backend python data_tasks.py add_news "xiaomi" "iphone-news-updates" 1
+        "apple": "https://gadgetph.com/smartphones/iphone/iphone-upcoming-releases/", #docker-compose exec backend python data_tasks.py add_news "apple" "iphone-news-updates" 1
+        "realme": "https://gadgetph.com/smartphones/realme/realme-upcoming-phones/", # docker-compose exec backend python data_tasks.py add_news "realme" "realme-news-updates" 1
+        "huawei": "https://gadgetph.com/smartphones/huawei/huawei-upcoming-phones/",
+        "vivo": "https://gadgetph.com/smartphones/vivo/vivo-upcoming-phones/",
+        # Add other brands here...
+    }
+    # -------------------------------------------
+
+    if limit > 0:
+        log_terminal(f"⚠️  TEST MODE ACTIVE: Limiting execution to first {limit} products.")
+
+    wcapi = get_wc_api()
+    if not wcapi:
+        return
+
+    # 1. Load Local DB
+    try:
+        with open(PRODUCT_DB_PATH, 'r', encoding='utf-8') as f:
+            local_products = json.load(f)
+    except:
+        log_terminal("❌ Error: Could not load local database.")
+        return
+
+    # Filter products
+    target_products = [p for p in local_products if brand_name.lower() in p['name'].lower()]
+    log_terminal(f"    - Found {len(target_products)} total matches for '{brand_name}'.")
+
+    if limit > 0:
+        target_products = target_products[:limit]
+        log_terminal(f"    - processing subset of {len(target_products)} products...")
+
+    if not target_products:
+        return
+
+    updated_count = 0
+    audit_log = [] 
+
+    # 2. Loop through targets
+    for index, prod in enumerate(target_products):
+        wc_id = prod['id']
+        name = prod['name']
+        permalink = prod.get('permalink') or prod.get('url')
+        
+        try:
+            # A. Fetch LIVE data
+            live_product = wcapi.get(f"products/{wc_id}").json()
+            meta_data = live_product.get('meta_data', [])
+
+            # B. Find existing YIKES tabs
+            yikes_tabs = []
+            for meta in meta_data:
+                if meta['key'] == 'yikes_woo_products_tabs':
+                    # --- FIX: Ensure yikes_tabs is a list before using it ---
+                    if isinstance(meta['value'], list):
+                        yikes_tabs = meta['value']
+                    else:
+                        yikes_tabs = [] 
+                    break
+            
+            # --- C. PREPARE CONTENT (Preserving your exact logic) ---
+            target_tab_id = f"{brand_name.lower()}-news-updates"
+            
+            # 1. Determine Link Target
+            target_url = BRAND_NEWS_MAP.get(brand_name.lower())
+            if not target_url: target_url = f"/tag/{tag_slug}/"
+            
+            # 2. Build the SEO Intro
+            # REFINED: Better flow that points "down" to the grid
+            seo_intro = (
+                f"<p>Stay updated on the latest <strong>{brand_name}</strong> price drops, "
+                f"software rollouts, and new model releases in the Philippines. "
+                f"Check out the trending stories below, or visit our dedicated "
+                f'<a href="{target_url}" target="_blank" rel="noopener noreferrer"><strong>{brand_name} News & Updates</strong></a> page for full coverage.</p>'
+            )
+            
+            # 3. Build Grid
+            content_grid = f'[recent_posts_by_tax tag="{tag_slug}" show="6" columns="3" image="1" show_tags="0" show_cats="0"]'
+
+            # 4. Wrap in Container
+            final_html_content = f'<div class="brand-news-container">{seo_intro}{content_grid}</div>'
+            
+            # 5. Define Title
+            new_title = f"📢 Latest {brand_name} News: Price Drops & Releases"
+
+            # --- D. UPDATE or APPEND LOGIC (Replaces the 'Skip' logic) ---
+            tab_found = False
+            
+            # Loop through existing tabs to see if we need to update one
+            for tab in yikes_tabs:
+                # Check if it's our tab (by ID) OR if it contains the shortcode (for older tabs without IDs)
+                if tab.get('id') == target_tab_id or tag_slug in str(tab.get('content', '')):
+                    # UPDATE the existing tab
+                    tab['title'] = new_title
+                    tab['id'] = target_tab_id # Enforce the correct ID
+                    tab['content'] = final_html_content
+                    print(f"    - 🔄 Updating existing tab for {name}...")
+                    tab_found = True
+                    break
+            
+            if not tab_found:
+                # APPEND a new tab
+                new_tab = {
+                    "title": new_title,
+                    "id": target_tab_id,
+                    "content": final_html_content
+                }
+                yikes_tabs.append(new_tab)
+                print(f"    - ➕ Appending new tab for {name}...")
+
+            # E. Send Update
+            payload = { "meta_data": [{ "key": "yikes_woo_products_tabs", "value": yikes_tabs }] }
+            
+            wcapi.put(f"products/{wc_id}", payload).raise_for_status()
+            print(f"    - ✅ Success: {name} (ID: {wc_id})")
+            
+            # F. Add to Audit Log
+            audit_log.append({
+                "id": wc_id,
+                "name": name,
+                "url": permalink,
+                "updated_at": datetime.now().isoformat()
+            })
+            
+            updated_count += 1
+            time.sleep(2.0)
+
+        except Exception as e:
+            print(f"    - ❌ Failed to update {name}: {e}")
+
+    # 3. Save Audit Log
+    if audit_log:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"audit_log_{brand_name}_{timestamp}.json"
+        try:
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump(audit_log, f, indent=2)
+            log_terminal(f"📄 Audit log saved to: {filename}")
+        except Exception as e:
+            log_terminal(f"⚠️ Failed to save audit log file: {e}")
+
+    log_terminal(f"--- [BULK TAB TOOL] Complete. Updated {updated_count} products. ---")
+
 # This special "if" block makes our file runnable as a script
 # from the command line.
+# This handles the command line arguments
+
+# This handles the command line arguments
+# This handles the command line arguments
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python data_tasks.py <product_id_to_check>")
+        print("\nUsage:")
+        print("  1. Quick Inspect:     python data_tasks.py <product_id>")
+        # print("  2. Search Categories: python data_tasks.py cats <search_term>")
+        print("  3. Add News Tabs:     python data_tasks.py add_news <Brand> <Tag> [Limit]")
+        print("  4. Explicit Inspect:  python data_tasks.py inspect <product_id>")
         sys.exit(1)
     
-    product_id_arg = sys.argv[1]
-    run_inspector(product_id_arg)
+    command = sys.argv[1]
+
+    # --- STRICT ROUTING LOGIC ---
+    
+    if command == "cats":
+        # Disabled for now as requested
+        pass
+
+    elif command == "add_news":
+        # Usage: python data_tasks.py add_news "Samsung" "samsung-news-updates" [1]
+        if len(sys.argv) < 4:
+            print("❌ Error: Please provide Brand Name and Tag Slug.")
+            print('Example: python data_tasks.py add_news "Samsung" "samsung-news-updates" 1')
+        else:
+            brand_name = sys.argv[2]
+            tag_slug = sys.argv[3]
+            
+            # Optional limit for testing
+            limit = 0
+            if len(sys.argv) > 4:
+                try:
+                    limit = int(sys.argv[4])
+                except ValueError:
+                    print("❌ Error: Limit must be an integer.")
+                    sys.exit(1)
+            
+            run_bulk_add_news_tab(brand_name, tag_slug, limit)
+            
+    elif command == "inspect":
+        # Explicit inspect command
+        if len(sys.argv) < 3:
+            print("❌ Error: Please provide a product ID.")
+        else:
+            run_inspector(sys.argv[2])
+
+    elif command.isdigit():
+        # Fallback: If the first argument is just a number, treat it as an ID check
+        run_inspector(command)
+        
+    else:
+        print(f"❌ Unknown command: '{command}'")

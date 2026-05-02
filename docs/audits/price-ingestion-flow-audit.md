@@ -50,10 +50,10 @@ Fallback mapping currently exists by exact cleaned product name. Fuzzy matching 
 
 ## Confirmed Findings
 
-- `backend/main.py` generic `/api/import/google-sheet` calls `import_from_google_sheet_task.delay(job_id, sheet_url)` without `source`, but `backend/data_tasks.py` requires `source`. The source-specific Tools buttons avoid this, but the generic route will fail if used.
-- `backend/data_tasks.py` logs importer failures but does not set `job:{job_id}` to `failed`, so the UI can remain stuck on `starting` or `processing`.
-- `backend/data_tasks.py` computes audit `price_before` after overwriting current price fields, so the sync report can label a real price change as `Synced`.
-- `frontend/src/components/PriceUpdateReviewView.jsx` posts unlink requests to `/api/unlink_product`, while `backend/main.py` defines `/api/unlink-product`.
+- Fixed 2026-05-02: `backend/main.py` generic `/api/import/google-sheet` now requires `source` and passes it to `import_from_google_sheet_task`.
+- Fixed 2026-05-02: `backend/data_tasks.py` importer failures now set `job:{job_id}` to `failed`, so the UI does not remain stuck on `starting` or `processing`.
+- Fixed 2026-05-02: `backend/data_tasks.py` captures `price_before` before overwriting current price fields, so the sync report can correctly label price changes.
+- Fixed 2026-05-02: `frontend/src/components/PriceUpdateReviewView.jsx` now posts reset/unlink requests to `/api/unlink-product` with the matched WooCommerce product ID. The backend also keeps a compatibility alias for `/api/unlink_product`.
 
 ## Enhancement Gaps
 
@@ -70,11 +70,11 @@ Fallback mapping currently exists by exact cleaned product name. Fuzzy matching 
 
 | Status | Item | Notes |
 | --- | --- | --- |
-| Pending | Fix audit `price_before` capture | Capture old price before updating `local_prod_to_update`. |
-| Pending | Set importer job to failed on exception | Update Redis `job:{job_id}` in importer `except` block. |
-| Pending | Fix unlink route mismatch | Align frontend route with backend or add compatibility alias. |
-| Pending | Fix or disable generic Google Sheet importer | Add `source` handling or remove unused path. |
-| Pending | Add source/match fields to staged rows | Track `matched_by`: marketplace_id, exact_name, manual_link, unmatched. |
+| Done | Fix audit `price_before` capture | Captures old price before updating `local_prod_to_update`; comparison is numeric-tolerant. |
+| Done | Set importer job to failed on exception | Updates Redis `job:{job_id}` in importer `except` block. |
+| Done | Fix unlink route mismatch | Frontend uses `/api/unlink-product`; backend accepts hyphen and underscore routes. |
+| Done | Fix or disable generic Google Sheet importer | Generic route validates `source` as `shopee` or `lazada`. |
+| Done | Add source/match fields to staged rows | Tracks `matched_by`: marketplace_id, exact_name, manual_link, unmatched; review UI displays it. |
 | Pending | Add duplicate ID detection | Detect same source/product ID across In Stock and Sold Out. |
 | Pending | Add skipped-row diagnostics | Store summary in job status or a related Redis key. |
 | Pending | Strengthen Shopee keying | Prefer product ID plus shop ID if local data supports it. |

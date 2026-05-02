@@ -8,9 +8,9 @@ import traceback
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 from datetime import datetime, timezone, date, timedelta
-from fastapi import FastAPI, UploadFile, File, HTTPException, Response
+from fastapi import FastAPI, UploadFile, File, HTTPException, Response, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse, FileResponse
+from fastapi.responses import RedirectResponse, FileResponse, JSONResponse
 from shared_state import redis_client, log_terminal, log_action
 from tasks import generate_preview_task, run_project_task, regenerate_content_task, regenerate_image_task, PROCESSED_URLS_KEY
 # from data_tasks import update_product_database_task
@@ -23,19 +23,143 @@ import csv
 from io import StringIO
 from google_client import get_gsc_service
 from google_auth_oauthlib.flow import Flow
+from sheet_parser import slugify
+from woocommerce import API
+from shared_state import log_terminal
+import httpx # Required for making async requests to WooCommerce
+from tasks import cleanup_fake_discounts_task
 # from data_tasks import import_from_google_sheet_task
 
 
-app = FastAPI()
+# app = FastAPI()
+# app.add_middleware(
+#     CORSMiddleware,
+#     allow_origins=["*"],
+#     allow_credentials=True,
+#     allow_methods=["*"],
+#     allow_headers=["*"],
+# )
+
+# ==========================================
+# 2. App Setup & Middleware (Your Snippet)
+# ==========================================
+
+app = FastAPI(title="ContentPipeline Backend")
+
+# Your CORS setup allows the React Frontend (port 5173) to talk to this Backend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    # allow_origins=["*"], # In production, change this to ["http://localhost:5173"]
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://0.0.0.0:5173",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+class UnlinkRequest(BaseModel):
+    product_id: int
+
+class UnlinkResponse(BaseModel):
+    success: bool
+    message: str
+    product_id: int
+
+
+# A simple wrapper helper (or import your existing 'wcapi' class here)
+async def wc_put_request(endpoint: str, data: Dict[str, Any]):
+    wc_url = os.getenv("WC_URL")
+    wc_key = os.getenv("WC_KEY")
+    wc_secret = os.getenv("WC_SECRET")
+    if not all([wc_url, wc_key, wc_secret]):
+        raise HTTPException(status_code=500, detail="WooCommerce API credentials are not configured.")
+
+    async with httpx.AsyncClient() as client:
+        # Basic Auth is standard for WooCommerce
+        return await client.put(
+            f"{wc_url}/wp-json/wc/v3/{endpoint}",
+            json=data,
+            auth=(wc_key, wc_secret),
+            timeout=30.0 # 30s timeout
+        )
+
+@app.post("/api/unlink-product", response_model=UnlinkResponse)
+@app.post("/api/unlink_product", response_model=UnlinkResponse, include_in_schema=False)
+async def unlink_product(request: UnlinkRequest):
+    """
+    Unlinks a product by clearing prices, external URL, and specific 
+    Shopee/Lazada metadata in WooCommerce.
+    """
+    
+    # Payload: Clears core fields (root) and custom fields (meta_data)
+    data_to_clear = {
+        "regular_price": "",
+        "sale_price": "",
+        "external_url": "",
+        "meta_data": [
+            { "key": "_shopee_id", "value": None },
+            { "key": "_lazada_id", "value": None },
+            { "key": "_shop_id", "value": None },
+            { "key": "_lazada_price", "value": None },
+            { "key": "_lazada_url", "value": None },
+            { "key": "_lazada_last_updated", "value": None },
+            { "key": "_shopee_price", "value": None },
+            { "key": "_shopee_url", "value": None },
+            { "key": "_shopee_last_updated", "value": None },
+            { "key": "_lazada_price_history", "value": [] },
+            { "key": "_shopee_price_history", "value": [] }
+        ]
+    }
+
+    try:
+        # Call the helper function defined above (or your wcapi wrapper)
+        endpoint = f"products/{request.product_id}"
+        response = await wc_put_request(endpoint, data_to_clear)
+
+        # --- Error Handling ---
+        
+        if response.status_code == 404:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Product ID {request.product_id} not found in WooCommerce."
+            )
+
+        if response.status_code in [401, 403]:
+             raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="WooCommerce authentication failed. Check API keys."
+            )
+
+        if response.status_code not in [200, 201]:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"WooCommerce Error: {response.text}"
+            )
+
+        # --- Success Response ---
+        return UnlinkResponse(
+            success=True,
+            message=f"Product {request.product_id} unlinked successfully.",
+            product_id=request.product_id
+        )
+
+    except HTTPException:
+        raise
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Connection error to WooCommerce: {str(e)}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal Server Error: {str(e)}"
+        )
 
 # --- Pydantic Models ---
 class PriceAlertSubscriptionPayload(BaseModel):
@@ -67,6 +191,7 @@ class StagedProduct(BaseModel):
     stock_status: Optional[str] = None
     matched_db_id: Optional[int] = None
     matched_db_slug: Optional[str] = None
+    matched_by: Optional[str] = None
 
 class ProcessStagedPayload(BaseModel):
     job_id: str
@@ -164,7 +289,7 @@ class SiteSelectionPayload(BaseModel):
 
 # --- Authentication ---
 # This is the same redirect URI we configured in the Google Cloud Console.
-REDIRECT_URI = "http://localhost:8000/api/auth/callback"
+REDIRECT_URI = "http://localhost:8002/api/auth/callback"
 # This defines the permission we are asking for.
 SCOPES = ["https://www.googleapis.com/auth/webmasters.readonly", "https://www.googleapis.com/auth/spreadsheets.readonly"]
 # SCOPES = ["https://www.googleapis.com/auth/webmasters.readonly"]
@@ -230,7 +355,18 @@ async def auth_callback(code: str, state: str):
         # Redirect back to the frontend with an error status
         return RedirectResponse("http://localhost:5173/?status=error")
 
-# --- WordPress Helper Functions ---
+# --- ADD THIS NEW HELPER FUNCTION ---
+def _clean_and_validate_draft(post_data: dict) -> dict:
+    """
+    Cleans up common AI data type mistakes before Pydantic validation.
+    """
+    # Fix for post_tags: AI might return a string instead of a list
+    if 'post_tags' in post_data and isinstance(post_data['post_tags'], str):
+        cleaned_tags = [tag.strip() for tag in post_data['post_tags'].split(',') if tag.strip()]
+        post_data['post_tags'] = cleaned_tags
+    
+    return post_data
+
 def publish_to_woocommerce(draft_data: dict, wp_url: str, auth_tuple: tuple, media_id: int):
     log_terminal(f"📦 Publishing draft {draft_data['draft_id']} to WooCommerce...")
     # This would be similar to the WordPress publishing logic but would:
@@ -241,29 +377,82 @@ def publish_to_woocommerce(draft_data: dict, wp_url: str, auth_tuple: tuple, med
     return {"link": f"{wp_url}/mock-product/{draft_data['slug']}", "id": 12345} # Return mock ID
 
 def get_or_create_term(name: str, term_type: str, base_url: str, auth_tuple: tuple) -> Optional[int]:
+    """
+    Finds a term by its exact name (using slug) or creates it if it doesn't exist.
+    This is more reliable than the default ?search= parameter.
+    """
     if not name:
         return None
+        
     headers = {'User-Agent': 'Mozilla/5.0'}
-    search_url = f"{base_url}/wp-json/wp/v2/{term_type}?search={name}"
+    term_slug = slugify(name) # Create a URL-friendly slug, e.g., "News" -> "news"
+    
+    # 1. First, try to get the term directly by its slug (most reliable method)
+    lookup_url = f"{base_url}/wp-json/wp/v2/{term_type}?slug={term_slug}"
+    log_terminal(f"ℹ️ Looking up {term_type} '{name}' with slug '{term_slug}'...")
+    
     try:
-        response = requests.get(search_url, headers=headers, auth=auth_tuple, timeout=10)
+        response = requests.get(lookup_url, headers=headers, auth=auth_tuple, timeout=10)
         response.raise_for_status()
         terms = response.json()
-        for term in terms:
-            if term['name'].lower() == name.lower():
-                log_terminal(f"✅ Found existing {term_type[:-1]} '{name}' with ID {term['id']}.")
-                return term['id']
-        log_terminal(f"ℹ️ No {term_type[:-1]} named '{name}' found, creating it...")
+        
+        if terms and isinstance(terms, list):
+            term_id = terms[0]['id']
+            log_terminal(f"✅ Found existing {term_type[:-1]} '{name}' with ID {term_id}.")
+            return term_id
+
+        # 2. If not found by slug, then try to create it
+        log_terminal(f"ℹ️ No {term_type[:-1]} named '{name}' found, attempting to create it...")
         create_url = f"{base_url}/wp-json/wp/v2/{term_type}"
-        create_payload = {'name': name}
+        create_payload = {'name': name, 'slug': term_slug}
         response = requests.post(create_url, headers=headers, json=create_payload, auth=auth_tuple, timeout=10)
-        response.raise_for_status()
+        
+        # Handle case where it exists but slug lookup failed (race condition, etc.)
+        if response.status_code == 400 and "term_exists" in response.text:
+            log_terminal(f"⚠️ Create failed because term already exists. Re-running search to find it...")
+            # Re-run a broader search to find the ID as a last resort
+            search_url = f"{base_url}/wp-json/wp/v2/{term_type}?search={name}"
+            response = requests.get(search_url, headers=headers, auth=auth_tuple, timeout=10)
+            response.raise_for_status()
+            terms = response.json()
+            for term in terms:
+                if term['name'].lower() == name.lower():
+                    log_terminal(f"✅ Found existing term '{name}' on second attempt with ID {term['id']}.")
+                    return term['id']
+
+        response.raise_for_status() # Raise other errors
         new_term = response.json()
         log_terminal(f"✅ Created new {term_type[:-1]} '{name}' with ID {new_term['id']}.")
         return new_term['id']
+
     except requests.RequestException as e:
-        log_terminal(f"❌ Could not get or create {term_type[:-1]} '{name}': {e}")
+        log_terminal(f"❌ Could not get or create {term_type[:-1]} '{name}'. Error: {e}")
         return None
+
+# def get_or_create_term(name: str, term_type: str, base_url: str, auth_tuple: tuple) -> Optional[int]:
+#     if not name:
+#         return None
+#     headers = {'User-Agent': 'Mozilla/5.0'}
+#     search_url = f"{base_url}/wp-json/wp/v2/{term_type}?search={name}"
+#     try:
+#         response = requests.get(search_url, headers=headers, auth=auth_tuple, timeout=10)
+#         response.raise_for_status()
+#         terms = response.json()
+#         for term in terms:
+#             if term['name'].lower() == name.lower():
+#                 log_terminal(f"✅ Found existing {term_type[:-1]} '{name}' with ID {term['id']}.")
+#                 return term['id']
+#         log_terminal(f"ℹ️ No {term_type[:-1]} named '{name}' found, creating it...")
+#         create_url = f"{base_url}/wp-json/wp/v2/{term_type}"
+#         create_payload = {'name': name}
+#         response = requests.post(create_url, headers=headers, json=create_payload, auth=auth_tuple, timeout=10)
+#         response.raise_for_status()
+#         new_term = response.json()
+#         log_terminal(f"✅ Created new {term_type[:-1]} '{name}' with ID {new_term['id']}.")
+#         return new_term['id']
+#     except requests.RequestException as e:
+#         log_terminal(f"❌ Could not get or create {term_type[:-1]} '{name}': {e}")
+#         return None
 
 # Endpoints starts here...
 @app.post("/api/projects/{project_id}/discover-new-articles", response_model=List[DiscoveredArticle])
@@ -348,24 +537,72 @@ async def refresh_product_database():
         log_terminal(f"❌ Failed to queue product database refresh task: {e}")
         raise HTTPException(status_code=500, detail="Failed to queue the refresh task.")
 
-# --- Approval Queue Endpoints ---
-@app.get("/api/drafts", response_model=List[Draft])
-async def get_all_drafts():
-    # This endpoint is now specifically for the Approval Queue (drafts only)
-    draft_ids = redis_client.smembers("drafts_set")
-    if not draft_ids:
-        return []
-    
-    draft_keys = [f"draft:{did}" for did in draft_ids]
-    pipelines = redis_client.mget(draft_keys)
-    posts = [json.loads(p) for p in pipelines if p]
-    return posts
 
-@app.get("/api/drafts/{draft_id}", response_model=Draft)
+@app.get("/api/drafts", response_model=None) 
+async def get_all_drafts():
+    try:
+        # 1. Safety Gate: Check if set exists
+        draft_ids = redis_client.smembers("drafts_set")
+        if not draft_ids or len(draft_ids) == 0:
+            return [] # Return empty list immediately, no error
+        
+        # 2. Build keys
+        post_keys = [f"draft:{pid.decode() if isinstance(pid, bytes) else pid}" for pid in draft_ids]
+        
+        # 3. Safety Gate: MGET
+        posts_json = redis_client.mget(post_keys)
+        if not posts_json:
+            return []
+
+        cleaned_posts = []
+        for p_json in posts_json:
+            if not p_json: 
+                continue
+            
+            try:
+                post_dict = json.loads(p_json)
+                # Strip heavy data
+                for key in ['featured_image_b64', 'post_content_html', 'content_history', 'image_history']:
+                    post_dict.pop(key, None)
+                
+                cleaned_posts.append(post_dict)
+            except Exception:
+                continue
+                    
+        return cleaned_posts
+    except Exception as e:
+        # This will show you the ACTUAL error in your terminal
+        print(f"DEBUG ERROR: {str(e)}") 
+        raise HTTPException(status_code=500, detail=f"Backend Logic Error: {str(e)}")
+
+# CHANGE: Set response_model to None (or Dict[str, Any]) to prevent validation crashes
+@app.get("/api/drafts/{draft_id}", response_model=None) 
 async def get_draft(draft_id: str):
+    # 1. Fetch from Redis
     draft_json = redis_client.get(f"draft:{draft_id}")
-    if not draft_json: raise HTTPException(status_code=404, detail="Draft not found.")
-    return json.loads(draft_json)
+    if not draft_json:
+        raise HTTPException(status_code=404, detail="Draft not found.")
+
+    # 2. Decode bytes if necessary (Docker Redis often returns bytes)
+    if isinstance(draft_json, bytes):
+        draft_json = draft_json.decode('utf-8')
+
+    try:
+        post_dict = json.loads(draft_json)
+
+        # 3. Use your repair function to fix Tags/HTML structure
+        # This ensures the Frontend gets "Clean" data even if we skip Pydantic validation
+        cleaned_dict = _clean_and_validate_draft(post_dict)
+
+        # 4. Return the full dictionary (including the Image and HTML)
+        return cleaned_dict
+        
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=500, detail="Corrupted data in database.")
+    except Exception as e:
+        print(f"Repair Logic Error: {e}")
+        return json.loads(draft_json) # Final fallback: return raw data if repair fails
+
 
 @app.put("/api/drafts/{draft_id}", response_model=Draft)
 async def update_draft(draft_id: str, draft_data: Draft):
@@ -374,19 +611,15 @@ async def update_draft(draft_id: str, draft_data: Draft):
     log_terminal(f"💾 Post '{draft_data.post_title}' (ID: {draft_id}) was updated locally.")
     return draft_data
 
+
 @app.post("/api/drafts/{draft_id}/regenerate", status_code=202)
 async def regenerate_draft(draft_id: str, payload: RegeneratePayload):
     if not redis_client.exists(f"draft:{draft_id}"):
         raise HTTPException(status_code=404, detail="Draft not found.")
-    
-    # Create a job_id for status tracking
     job_id = f"regen_content_{uuid.uuid4().hex[:10]}"
     job_status = { "job_id": job_id, "status": "starting" }
     redis_client.set(f"job:{job_id}", json.dumps(job_status), ex=3600)
-
-    # Pass the job_id and the new edited_prompt to the Celery task
     regenerate_content_task.delay(job_id, draft_id, payload.edited_prompt)
-    
     log_terminal(f"🔄 Queued content regeneration for draft ID: {draft_id}. Job ID: {job_id}")
     return {"job_id": job_id}
 
@@ -394,14 +627,13 @@ async def regenerate_draft(draft_id: str, payload: RegeneratePayload):
 async def regenerate_draft_image(draft_id: str):
     if not redis_client.exists(f"draft:{draft_id}"):
         raise HTTPException(status_code=404, detail="Draft not found.")
-    
     job_id = f"regen_img_{uuid.uuid4().hex[:10]}"
     job_status = { "job_id": job_id, "status": "starting" }
     redis_client.set(f"job:{job_id}", json.dumps(job_status), ex=3600)
-
     regenerate_image_task.delay(job_id, draft_id)
     log_terminal(f"🎨 Queued image regeneration task for draft ID: {draft_id}. Job ID: {job_id}")
     return {"job_id": job_id}
+
 
 @app.post("/api/drafts/{draft_id}/publish")
 async def publish_draft(draft_id: str):
@@ -409,121 +641,55 @@ async def publish_draft(draft_id: str):
     if not draft_json: raise HTTPException(status_code=404, detail="Draft not found.")
     draft_data = json.loads(draft_json)
 
-    required_fields = [
-        'post_title', 'slug', 'post_content_html', 'seo_title', 
-        'meta_description', 'focus_keyphrase', 'featured_image_b64'
-    ]
-    missing_fields = [field for field in required_fields if not draft_data.get(field)]
-    if missing_fields:
-        message = f"Cannot publish. The following fields are missing or empty: {', '.join(missing_fields)}"
-        log_terminal(f"❌ Publishing validation failed for draft {draft_id}: {message}")
-        raise HTTPException(status_code=400, detail=message)
-
-    WP_URL = os.getenv("WP_URL")
-    WP_USER = os.getenv("WP_USERNAME")
-    WP_PASSWORD = os.getenv("WP_APPLICATION_PASSWORD")
-
+    WP_URL, WP_USER, WP_PASSWORD = os.getenv("WP_URL"), os.getenv("WP_USERNAME"), os.getenv("WP_APPLICATION_PASSWORD")
     if not all([WP_URL, WP_USER, WP_PASSWORD]):
         raise HTTPException(status_code=500, detail="WordPress credentials are not configured on the server.")
-
     auth_tuple = (WP_USER, WP_PASSWORD)
     
-    time.sleep(1)
-
     try:
-        image_b64 = draft_data.get("featured_image_b64")
-        image_data = base64.b64decode(image_b64)
+        image_data = base64.b64decode(draft_data.get("featured_image_b64"))
         image_name = f"{draft_data['slug']}.png"
+        headers = {'User-Agent': 'Mozilla/5.0', 'Content-Disposition': f'attachment; filename="{image_name}"'}
+        media_payload = {'title': draft_data.get('image_title'), 'alt_text': draft_data.get('image_alt_text'), 'status': 'publish'}
+        upload_response = requests.post(f"{WP_URL.rstrip('/')}/wp-json/wp/v2/media", headers=headers, files={'file': (image_name, image_data, 'image/png')}, data=media_payload, auth=auth_tuple, timeout=60)
+        upload_response.raise_for_status()
+        media_id = upload_response.json()['id']
         
-        log_terminal("⬆️ Uploading image to WordPress with metadata...")
-        upload_url = f"{WP_URL.rstrip('/')}/wp-json/wp/v2/media"
-        
-        headers = {
-            'User-Agent': 'Mozilla/5.0',
-            'Content-Disposition': f'attachment; filename="{image_name}"',
-        }
-
-        media_id = None
-        try:
-            files = {'file': (image_name, image_data, 'image/png')}
-            media_payload = {
-                'title': draft_data.get('image_title'),
-                'alt_text': draft_data.get('image_alt_text'),
-                'status': 'publish'
+        # category_id = get_or_create_term(draft_data.get('post_category'), 'categories', WP_URL, auth_tuple)
+        category_id = 24559
+        tag_ids = [tid for tid in [get_or_create_term(tag, 'tags', WP_URL, auth_tuple) for tag in draft_data.get('post_tags', [])] if tid]
+        post_payload = {
+            'title': draft_data['post_title'],
+            'content': draft_data['post_content_html'],
+            'excerpt': draft_data.get('post_excerpt'),
+            'status': 'draft',
+            'slug': draft_data['slug'],
+            'featured_media': media_id,
+            'categories': [category_id] if category_id else [],
+            'tags': tag_ids,
+            'meta': {
+                '_yoast_wpseo_title': draft_data.get('seo_title'),
+                '_yoast_wpseo_focuskw': draft_data.get('focus_keyphrase'),
+                '_yoast_wpseo_metadesc': draft_data.get('meta_description'),
+                'source_url': draft_data.get('source_url')
             }
-            upload_response = requests.post(
-                upload_url, 
-                headers=headers, 
-                files=files,
-                data=media_payload,
-                auth=auth_tuple, 
-                timeout=60
-            )
-            upload_response.raise_for_status()
-            media_data = upload_response.json()
-            media_id = media_data['id']
-            log_terminal(f"✅ Image uploaded. Media ID: {media_id}")
-
-        except requests.exceptions.RequestException as e:
-            log_terminal("--- ❌ IMAGE UPLOAD FAILED: Detailed Server Response ---")
-            if e.response is not None:
-                log_terminal(f"    - Status Code: {e.response.status_code}")
-                log_terminal(f"    - Headers: {e.response.headers}")
-                log_terminal(f"    - Body: {e.response.text}")
-            log_terminal("---------------------------------------------------------")
-            raise
-
-        draft_type = draft_data.get('draft_type', 'wordpress_post')
+        }       
         
-        if draft_type == 'woocommerce_product':
-            response_data = publish_to_woocommerce(draft_data, WP_URL, auth_tuple, media_id)
-        else:
-            category_id = get_or_create_term(draft_data.get('post_category'), 'categories', WP_URL, auth_tuple)
-            tag_ids = [tid for tid in [get_or_create_term(tag, 'tags', WP_URL, auth_tuple) for tag in draft_data.get('post_tags', [])] if tid is not None]
-
-            post_payload = {
-                'title': draft_data['post_title'],
-                'content': draft_data['post_content_html'],
-                'excerpt': draft_data.get('post_excerpt'),
-                'status': 'publish',
-                'slug': draft_data['slug'],
-                'featured_media': media_id,
-                'categories': [category_id] if category_id else [],
-                'tags': tag_ids,
-                'meta': {
-                    '_yoast_wpseo_title': draft_data.get('seo_title'),
-                    '_yoast_wpseo_focuskw': draft_data.get('focus_keyphrase'),
-                    '_yoast_wpseo_metadesc': draft_data.get('meta_description'),
-                    'source_url': draft_data.get('source_url')
-                }
-            }
-            existing_post_id = draft_data.get('wordpress_post_id')
-            post_headers = {'User-Agent': 'Mozilla/5.0'}
-            if existing_post_id:
-                log_terminal(f"📝 Updating existing post (ID: {existing_post_id}) in WordPress...")
-                post_url = f"{WP_URL.rstrip('/')}/wp-json/wp/v2/posts/{existing_post_id}"
-                post_response = requests.post(post_url, headers=post_headers, json=post_payload, auth=auth_tuple, timeout=30)
-            else:
-                log_terminal("📝 Creating new post in WordPress...")
-                post_url = f"{WP_URL.rstrip('/')}/wp-json/wp/v2/posts"
-                post_response = requests.post(post_url, headers=post_headers, json=post_payload, auth=auth_tuple, timeout=30)
-            
-            post_response.raise_for_status()
-            response_data = post_response.json()
+        post_url = f"{WP_URL.rstrip('/')}/wp-json/wp/v2/posts"
+        if draft_data.get('wordpress_post_id'): post_url += f"/{draft_data['wordpress_post_id']}"
+        post_response = requests.post(post_url, headers={'User-Agent': 'Mozilla/5.0'}, json=post_payload, auth=auth_tuple, timeout=30)
+        post_response.raise_for_status()
+        response_data = post_response.json()
         
-        log_terminal(f"✅ Post published successfully! URL: {response_data['link']}")
-
         draft_data['status'] = 'published'
         draft_data['wordpress_post_id'] = response_data.get('id')
         redis_client.set(f"draft:{draft_id}", json.dumps(draft_data))
         redis_client.srem("drafts_set", draft_id)
         redis_client.sadd("published_set", draft_id)
-
+        
         return {"message": "Draft published successfully!", "url": response_data['link']}
-
     except requests.exceptions.RequestException as e:
         error_detail = f"An error occurred during publishing: {e.response.text if e.response else e}"
-        log_terminal(f"❌ Publishing failed: {error_detail}")
         raise HTTPException(status_code=500, detail=error_detail)
 
 # --- Other Endpoints ---
@@ -789,26 +955,67 @@ async def trigger_gsc_fetch():
         log_terminal(f"❌ ERROR triggering GSC fetch task: {e}")
         raise HTTPException(status_code=500, detail="Failed to queue the GSC data fetch task.")
 
-@app.get("/api/posts", response_model=List[Draft])
+# @app.get("/api/posts", response_model=List[Draft])
+# async def get_all_posts():
+#     """
+#     Fetches all posts, both drafts and published, for the Content Library.
+#     """
+#     log_terminal("--- HIT: GET /api/posts ---") # <-- NEW LOG
+#     try:
+#         draft_ids = redis_client.smembers("drafts_set")
+#         published_ids = redis_client.smembers("published_set")
+#         all_ids = draft_ids.union(published_ids)
+#         if not all_ids:
+#             return []
+        
+#         post_keys = [f"draft:{pid}" for pid in all_ids]
+#         posts_json = redis_client.mget(post_keys)
+        
+#         all_posts = [json.loads(p) for p in posts_json if p]
+#         return all_posts
+#     except Exception as e:
+#         log_terminal(f"❌ ERROR in /api/posts: {e}") # <-- Enhanced Error Log
+#         raise HTTPException(status_code=500, detail="Failed to retrieve posts.")
+
+@app.get("/api/posts")
 async def get_all_posts():
     """
-    Fetches all posts, both drafts and published, for the Content Library.
+    Fetches all posts but EXCLUDES heavy content (HTML/Images) to prevent timeouts.
     """
-    log_terminal("--- HIT: GET /api/posts ---") # <-- NEW LOG
+    log_terminal("--- HIT: GET /api/posts (Lite Mode) ---")
     try:
+        # 1. Get all IDs
         draft_ids = redis_client.smembers("drafts_set")
         published_ids = redis_client.smembers("published_set")
         all_ids = draft_ids.union(published_ids)
+        
         if not all_ids:
             return []
         
+        # 2. Fetch Data
         post_keys = [f"draft:{pid}" for pid in all_ids]
         posts_json = redis_client.mget(post_keys)
         
-        all_posts = [json.loads(p) for p in posts_json if p]
-        return all_posts
+        lite_posts = []
+        for p in posts_json:
+            if p:
+                post_data = json.loads(p)
+                
+                # --- OPTIMIZATION: Remove Heavy Fields ---
+                # We only send metadata. The full content is fetched only when 
+                # the user clicks "Edit" (which calls /api/drafts/{id}).
+                post_data.pop('post_content_html', None)
+                post_data.pop('featured_image_b64', None)
+                post_data.pop('content_history', None)
+                post_data.pop('image_history', None)
+                
+                lite_posts.append(post_data)
+            
+        log_terminal(f"✅ Successfully fetched {len(lite_posts)} posts (Lite Mode).")
+        return lite_posts
+
     except Exception as e:
-        log_terminal(f"❌ ERROR in /api/posts: {e}") # <-- Enhanced Error Log
+        log_terminal(f"❌ ERROR in /api/posts: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve posts.")
 
 @app.delete("/api/posts/{post_id}", status_code=204)
@@ -1037,44 +1244,60 @@ async def get_gsc_performance_data(start_date_str: str, end_date_str: str):
 @app.get("/api/posts/with-stats")
 async def get_all_posts_with_stats():
     """
-    Fetches all posts and enriches published ones with the latest GSC stats.
+    Fetches posts with GSC stats, but EXCLUDES heavy content (Lite Mode)
+    to prevent dashboard timeouts.
     """
-    log_terminal("--- HIT: GET /api/posts/with-stats ---")
+    log_terminal("--- HIT: GET /api/posts/with-stats (Lite Mode) ---")
     try:
+        # 1. Fetch IDs and handle Docker byte-decoding
         draft_ids = redis_client.smembers("drafts_set")
         published_ids = redis_client.smembers("published_set")
         all_ids = draft_ids.union(published_ids)
+        
         if not all_ids:
             return []
         
-        post_keys = [f"draft:{pid}" for pid in all_ids]
-        posts_json = redis_client.mget(post_keys)
+        # 2. Ensure all IDs are strings for the key list
+        clean_ids = [pid.decode('utf-8') if isinstance(pid, bytes) else pid for pid in all_ids]
+        post_keys = [f"draft:{pid}" for pid in clean_ids]
         
+        posts_json = redis_client.mget(post_keys)
         all_posts = []
-        yesterday_str = (date.today() - timedelta(days=1)).strftime('%Y-%m-%d')
 
-        for post_json in posts_json:
-            if not post_json: continue
+        for p in posts_json:
+            if not p: continue
             
-            post = json.loads(post_json)
-            # If the post is published, try to find its stats
-            if post.get("status") == "published":
-                cache_key = f"gsc:metrics:{post['draft_id']}:{yesterday_str}"
-                cached_metric = redis_client.get(cache_key)
-                if cached_metric:
-                    metric_data = json.loads(cached_metric)
-                    post['clicks'] = metric_data.get('clicks', 0)
-                    post['impressions'] = metric_data.get('impressions', 0)
-                else:
-                    post['clicks'] = 0
-                    post['impressions'] = 0
+            # Decode p if it's bytes
+            if isinstance(p, bytes):
+                p = p.decode('utf-8')
+                
+            post = json.loads(p)
+            
+            # --- OPTIMIZATION: Lite Mode ---
+            for heavy_field in ['post_content_html', 'featured_image_b64', 'content_history', 'image_history']:
+                post.pop(heavy_field, None)
+
+            # --- THE FIX: Use the 'latest' key to match your Task logic ---
+            # We check for stats regardless of status, just in case, 
+            # but usually only 'published' has them.
+            metrics_key = f"gsc:metrics:{post['draft_id']}:latest"
+            cached_metric = redis_client.get(metrics_key)
+            
+            if cached_metric:
+                metric_data = json.loads(cached_metric)
+                post['clicks'] = metric_data.get('clicks', 0)
+                post['impressions'] = metric_data.get('impressions', 0)
+            else:
+                post['clicks'] = 0
+                post['impressions'] = 0
+            
             all_posts.append(post)
             
         return all_posts
     except Exception as e:
-        log_terminal(f"❌ Could not retrieve posts with stats: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve posts with stats.")
-
+        log_terminal(f"❌ ERROR in /api/posts/with-stats: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Backend Error: {str(e)}")
+    
 @app.get("/api/gsc/insights")
 async def get_gsc_insights():
     """
@@ -1208,17 +1431,22 @@ async def import_from_google_sheet(payload: dict):
         from data_tasks import import_from_google_sheet_task
         
         sheet_url = payload.get("sheet_url")
+        source = (payload.get("source") or "").strip().lower()
         if not sheet_url:
             raise HTTPException(status_code=400, detail="Google Sheet URL is required.")
+        if source not in {"shopee", "lazada"}:
+            raise HTTPException(status_code=400, detail="source must be 'shopee' or 'lazada'.")
 
         job_id = f"import_{uuid.uuid4().hex[:10]}"
         job_status = { "job_id": job_id, "status": "starting" }
         redis_client.set(f"job:{job_id}", json.dumps(job_status), ex=3600)
 
-        import_from_google_sheet_task.delay(job_id, sheet_url)
+        import_from_google_sheet_task.delay(job_id, sheet_url, source)
         
         log_terminal(f"✅ Queued Google Sheet import for {sheet_url}. Job ID: {job_id}")
         return {"job_id": job_id}
+    except HTTPException:
+        raise
     except Exception as e:
         log_terminal(f"❌ ERROR queuing Google Sheet import: {e}")
         raise HTTPException(status_code=500, detail="Failed to queue the import task.")
@@ -1283,43 +1511,6 @@ async def process_staged_data(payload: ProcessStagedPayload):
         print(f"--- ❌ FATAL ERROR: {error_details} ---", flush=True)
 
         raise HTTPException(status_code=500, detail="Failed to queue task. Check backend-1 log for full traceback.")
-
-@app.get("/api/import/staged-data/{job_id}", response_model=List[StagedProduct])
-async def get_staged_data(job_id: str):
-    """
-    Retrieves the staged product data for a given import job for user review.
-    """
-    log_terminal(f"--- HIT: GET /api/import/staged-data/{job_id} ---")
-    staging_key = f"staging_area:{job_id}"
-    staged_json = redis_client.get(staging_key)
-
-    if not staged_json:
-        raise HTTPException(status_code=404, detail="Staged data not found or expired.")
-    
-    return json.loads(staged_json)
-
-@app.post("/api/import/process-staged-data", response_model=JobCreationResponse)
-async def process_staged_data(payload: ProcessStagedPayload):
-    """
-    Kicks off a background task to update WooCommerce with the user's
-    approved products from the staging area.
-    """
-    log_terminal("--- HIT: POST /api/import/process-staged-data ---")
-    try:
-        from data_tasks import update_woocommerce_products_task
-        
-        final_job_id = f"wcsync_{uuid.uuid4().hex[:10]}"
-        job_status = { "job_id": final_job_id, "status": "starting" }
-        redis_client.set(f"job:{final_job_id}", json.dumps(job_status), ex=3600)
-
-        products_as_dict_list = [p.dict() for p in payload.approved_products]
-        update_woocommerce_products_task.delay(final_job_id, products_as_dict_list)
-        
-        log_terminal(f"✅ Queued final WooCommerce sync. Job ID: {final_job_id}")
-        return {"job_id": final_job_id}
-    except Exception as e:
-        log_terminal(f"❌ ERROR queuing final WooCommerce sync: {e}")
-        raise HTTPException(status_code=500, detail="Failed to queue the final sync task.")
     
 @app.get("/api/run-migration")
 async def run_migration():
@@ -1495,3 +1686,52 @@ async def subscribe_to_price_alert(payload: PriceAlertSubscriptionPayload):
     except Exception as e:
         log_terminal(f"❌ ERROR queuing price alert task: {e}")
         raise HTTPException(status_code=500, detail="Failed to queue the subscription task.")
+    
+@app.get("/api/jobs/{job_id}")
+def get_job_status(job_id: str):
+    """
+    Fetches the real-time status of a background job from Redis.
+    Used by the frontend to poll for completion.
+    """
+    # Look up the job using the same key format we used in the task
+    raw_data = redis_client.get(f"job:{job_id}")
+    
+    if not raw_data:
+        return JSONResponse(status_code=404, content={"status": "not_found", "error": "Job ID not found"})
+        
+    # Return the JSON data directly
+    return json.loads(raw_data)
+
+@app.post("/api/tools/cleanup-prices")
+def trigger_price_cleanup(
+    product_id: Optional[int] = None, 
+    dry_run: bool = True
+):
+    """
+    Triggers the Fake Price Protection task.
+    - dry_run=True (default): Scans and logs issues but DOES NOT change data.
+    - dry_run=False: Actually updates the prices in WooCommerce.
+    - product_id: Optional. If provided, checks only that specific ID.
+    """
+    job_id = str(uuid.uuid4())
+    
+    # Initialize the job status in Redis immediately so the UI can poll it
+    initial_status = {
+        "job_id": job_id, 
+        "status": "queued", 
+        "type": "price_cleanup",
+        "dry_run": dry_run
+    }
+    redis_client.set(f"job:{job_id}", json.dumps(initial_status))
+    
+    # Trigger the Celery task asynchronously
+    task = cleanup_fake_discounts_task.delay(job_id, product_id, dry_run)
+    
+    log_terminal(f"🚀 [API] Triggered Price Cleanup (Job: {job_id}, Dry Run: {dry_run})")
+    
+    return {
+        "message": "Price cleanup task started.",
+        "job_id": job_id,
+        "dry_run": dry_run,
+        "target": f"Product {product_id}" if product_id else "All On-Sale Products"
+    }

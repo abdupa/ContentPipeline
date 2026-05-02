@@ -15,6 +15,13 @@ const getSourceLabel = (product) => {
 
 const getSourceIdLabel = (product) => `${getSourceLabel(product)} ID`;
 
+const getMatchLabel = (matchedBy) => ({
+  marketplace_id: 'Marketplace ID',
+  exact_name: 'Exact Name',
+  manual_link: 'Manual Link',
+  unmatched: 'Unmatched'
+}[matchedBy] || 'Unknown');
+
 const getRowKey = (product, index) => {
   if (product.row_key) return product.row_key;
   const source = product.source || 'source';
@@ -63,6 +70,23 @@ const StockStatusBadge = ({ status }) => {
   return (
     <span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-medium ${bgColor} ${textColor}`}>
       {text}
+    </span>
+  );
+};
+
+const MatchSourceBadge = ({ matchedBy }) => {
+  const normalized = matchedBy || 'unmatched';
+  const color = normalized === 'marketplace_id'
+    ? 'bg-emerald-100 text-emerald-800'
+    : normalized === 'exact_name'
+      ? 'bg-amber-100 text-amber-800'
+      : normalized === 'manual_link'
+        ? 'bg-indigo-100 text-indigo-800'
+        : 'bg-gray-100 text-gray-700';
+
+  return (
+    <span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-medium ${color}`}>
+      {getMatchLabel(normalized)}
     </span>
   );
 };
@@ -151,7 +175,7 @@ const MatchedActionCell = ({ product, onSetAction, onUnlink }) => (
     </label>
 
     <button
-      onClick={() => onUnlink(product.parsed_name)}
+      onClick={() => onUnlink(product)}
       className="flex w-full items-center justify-center rounded border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-600 hover:bg-red-100"
     >
       <Trash2 className="mr-1 h-3 w-3" />
@@ -182,6 +206,7 @@ const PriceReviewCard = ({ product, index, dbCache, onSetAction, onLinkProduct, 
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs font-bold text-gray-500">#{index + 1}</span>
           <StatusBadge status={product.status} action={product.action} />
+          <MatchSourceBadge matchedBy={product.matched_by} />
           <StockStatusBadge status={product.stock_status} />
         </div>
         <span className="shrink-0 rounded bg-gray-100 px-2 py-1 text-xs font-semibold text-gray-700">
@@ -210,6 +235,7 @@ const PriceReviewCard = ({ product, index, dbCache, onSetAction, onLinkProduct, 
       </div>
 
       <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <DetailLine label="Match Source" value={getMatchLabel(product.matched_by)} />
         <DetailLine label={getSourceIdLabel(product)} value={marketplaceId} mono />
         <DetailLine label="Shop ID" value={product.shop_id} mono />
         <DetailLine label="Current DB Price" value={product.current_price} />
@@ -317,20 +343,27 @@ const PriceUpdateReviewView = ({ jobId, onJobStarted, onBack }) => {
               action: 'link',
               parsed_name: selectedProductFromDb.name,
               linked_db_id: selectedProductFromDb.id,
-              slug: selectedProductFromDb.slug
+              slug: selectedProductFromDb.slug,
+              matched_by: 'manual_link'
             }
           : p
       )
     );
   };
 
-  const handleUnlink = async (productName) => {
-    if (!window.confirm(`Are you sure you want to delete the price mapping for "${productName}"?`)) {
+  const handleUnlink = async (product) => {
+    const productId = product.matched_db_id || product.linked_db_id;
+    if (!productId) {
+      alert('Cannot reset this product because no WooCommerce product ID is linked.');
+      return;
+    }
+
+    if (!window.confirm(`Are you sure you want to delete the price mapping for "${product.parsed_name}"?`)) {
       return;
     }
     try {
-      await apiClient.post('/api/unlink_product', {
-        scraped_product_name: productName
+      await apiClient.post('/api/unlink-product', {
+        product_id: productId
       });
 
       alert('Unlinked successfully. Reloading data...');
@@ -450,6 +483,7 @@ const PriceUpdateReviewView = ({ jobId, onJobStarted, onBack }) => {
               <th className="w-[190px] px-3 py-3 text-left text-xs font-bold uppercase text-gray-600">Action</th>
               <th className="w-[320px] px-3 py-3 text-left text-xs font-bold uppercase text-gray-600">Product / Link Target</th>
               <th className="w-[120px] px-3 py-3 text-left text-xs font-bold uppercase text-gray-600">Status</th>
+              <th className="w-[135px] px-3 py-3 text-left text-xs font-bold uppercase text-gray-600">Matched By</th>
               <th className="w-[110px] px-3 py-3 text-left text-xs font-bold uppercase text-gray-600">Stock</th>
               <th className="w-[190px] px-3 py-3 text-left text-xs font-bold uppercase text-gray-600">Source ID</th>
               <th className="w-[130px] px-3 py-3 text-left text-xs font-bold uppercase text-gray-600">Shop ID</th>
@@ -490,6 +524,7 @@ const PriceUpdateReviewView = ({ jobId, onJobStarted, onBack }) => {
                     )}
                   </td>
                   <td className="px-3 py-3 align-top"><StatusBadge status={product.status} action={product.action} /></td>
+                  <td className="px-3 py-3 align-top"><MatchSourceBadge matchedBy={product.matched_by} /></td>
                   <td className="px-3 py-3 align-top"><StockStatusBadge status={product.stock_status} /></td>
                   <td className="px-3 py-3 align-top font-mono text-xs text-gray-600 break-all" title={marketplaceId || 'N/A'}>
                     <span className="mb-1 block text-[10px] font-sans font-semibold uppercase text-gray-400">{getSourceIdLabel(product)}</span>
