@@ -2,6 +2,11 @@
 /backend/venv/
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 # Node
 /frontend/node_modules/
@@ -14,6 +19,8 @@ npm-debug.log
 # IDE/OS files
 .vscode/
 .DS_Store
+.idea/
+.codex
 
 # Environment variables
 # Never commit secret keys!
@@ -25,10 +32,22 @@ backend/browser_profile/
 chrome_dev_session/
 backend/google-sheets-credentials.json
 
+# Runtime data and local logs
+*.log
+backend/audit_log.jsonl
+backend/celerybeat-schedule*
+celerybeat-schedule*
+
 # Ignore common temporary file names
+tmp/
+tmp.*
+tmp.js
 frontend/tmp.css
 frontend/tmp.html
 frontend/tmp.json
+backend/tmp.*
+frontend/**/tmp/
+frontend/**/tmp.*
 
 # Ignore files with version numbers or specific suffixes
 frontend/*[0-9].*.php
@@ -38,10 +57,20 @@ frontend/*[0-9].*.js
 
 # Ignore specific JSON files if they are temporary
 frontend/tmp*.json
+frontend/**/tmp*.json
 
-# Ignore python backup files
-backend/* copy.py
+# Ignore backup/copy files
+* copy*
+* Copy*
+*Orig*
+*Back*
+*Backup*
+*.bak
+*.backup
 
 # Ignore temporary php files
 backend/tmp.php
 backend/product_database.json
+
+# Nested plugin/vendor repositories should not be committed into this repo
+frontend/**/.git/
