@@ -180,6 +180,7 @@ If the change relates to an audit item, update the relevant file:
 
 - `docs/audits/price-ingestion-flow-audit.md`
 - `docs/audits/frontend-price-workflow-ui-audit.md`
+- `docs/qa/price-ingestion-qa-test-cases.md`
 
 Use the implementation tracker and append-only findings log.
 

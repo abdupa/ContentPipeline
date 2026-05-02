@@ -92,6 +92,7 @@ Status meanings:
 - Active Google Sheet flow is in `backend/data_tasks.py`, not mainly `backend/tasks.py`.
 - `backend/tasks.py` still contains older Bright Data/MCP and enrichment paths that can interact with WooCommerce, but they are not the current Tools Shopee/Lazada sheet importer path.
 - The command `docker-compose exec backend python data_tasks.py <woo_product_id>` inspects a live WooCommerce product by WooCommerce ID, not marketplace ID.
+- Real validation passes are tracked in `docs/qa/price-ingestion-qa-test-cases.md` using QA reference IDs such as `QA-PI-001`.
 
 ## Append-Only Findings Log
 
