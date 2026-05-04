@@ -238,6 +238,9 @@ Status meanings:
 | Live Sync Validated | Backfill affiliate diagnostics for stored source URLs | Existing linked sources such as old Shopee data are labeled during sync without regenerating affiliate URLs. Real sync report showed old Shopee winners as valid. |
 | Workflow Validated | Add candidate bucket for unmatched staged products | Unmatched Lazada row saved to `product_candidates.json` and displayed in Tools Candidate Bucket with affiliate status. |
 | Workflow Validated | Add candidate management controls | Candidate Bucket supports editing canonical name, type tag, status, notes, and linked Woo ID without mutating WooCommerce. Save/persist workflow validated. |
+| Code Validated | Refine Candidate Bucket management UI | Candidate Bucket now uses responsive cards with `#` reference, clearer Woo link label, visible Save action, and no main `Nearest Match` field. Needs final UI workflow retest after backend restart. |
+| Documentation Planned | Define product data collection roadmap | See `docs/roadmaps/product-data-collection-roadmap.md` for phone/tablet GSMArena discovery, non-phone trusted source strategy, source roles, validation plan, and implementation order. |
+| Documentation Planned | Define phone database enrichment roadmap | See `docs/roadmaps/phone-database-enrichment-roadmap.md` for the separated GSMArena migration lane, Woo compare decisions, approval gates, idempotency, rate limiting, observability, and QA plan. |
 | Pending | Add candidate-to-phone-scraper handoff | Use existing phone scraper for approved phone candidates when a supported spec source URL is available. |
 | Pending | Add canonical product-name reference list | Use as a review aid for staged/candidate products while keeping marketplace product ID as the primary mapping key. |
 | Pending | Optimize full product database refresh | Replace per-product fetch/sleep flow with paged field fetch, chunked saves, progress, and cancellation. |
@@ -267,4 +270,7 @@ Use this section for new findings as review continues.
 - Added Candidate Bucket placeholder action `Scrape Later` for the future phone/spec scraper handoff. This is intentionally disabled and has no backend behavior yet.
 - Phase 2B implementation: Added review-only candidate management fields for canonical name, type tag, status, notes, and linked Woo product. These updates are stored only in `product_candidates.json`.
 - QA-PI-014 workflow validation: Candidate management saved `Samsung Galaxy Buds4` as status `researching`, type `earbuds`, with note `Test note` and updated timestamp.
+- Candidate Bucket UI refinement: Converted the management surface from a wide table to responsive cards, added `#` reference markers, removed `Nearest Match` from the primary display, and clarified `Woo Link` as `Link Existing Woo Product`.
+- Added roadmap document for product data collection automation. The roadmap separates source discovery, source approval, preview-only extraction, and WooCommerce draft creation for phones/tablets and non-phone products.
+- Added separate Phone Database Enrichment roadmap for migrating the existing GSMArena scraper as its own WooCommerce enrichment lane instead of coupling it directly to Candidate Bucket.
 ```
